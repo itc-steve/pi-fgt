@@ -161,11 +161,50 @@ export function registerSystemTools(pi: ExtensionAPI): void {
   pi.registerTool({
     name: "get_available_licenses",
     label: "FortiGate: Licenses",
-    description: "Available licenses (monitor/license/status).",
+    description:
+      "Available licenses (monitor/license/status). " +
+      "Default = health subset (fortiguard/forticare/av/ips/webfilter/forticloud/vdom). " +
+      "verbose=true for full entitlement dump (~40 keys).",
     promptSnippet: "FortiGate licenses",
-    parameters: Type.Object({ ...deviceParam }),
+    parameters: Type.Object({
+      ...deviceParam,
+      verbose: Type.Optional(Type.Boolean({ description: "Full entitlement dump" })),
+    }),
     async execute(_toolCallId, params, signal, onUpdate, ctx) {
-      return runForti("monitor/license/status", params, signal, onUpdate, ctx);
+      if (params.verbose) {
+        return runForti("monitor/license/status", params, signal, onUpdate, ctx);
+      }
+      try {
+        const { name, device: dev } = resolveDevice(params.device);
+        const token = getToken(dev);
+        const raw: any = fortiResults(
+          await fortiGet("monitor/license/status", dev, token, {}, signal),
+        );
+        // Health-check projection — drop no_license SaaS noise
+        const pick = (obj: any, keys: string[]) => {
+          if (!obj || typeof obj !== "object") return obj;
+          const out: Record<string, unknown> = {};
+          for (const k of keys) if (k in obj) out[k] = obj[k];
+          return out;
+        };
+        const data = {
+          fortiguard: pick(raw.fortiguard, ["status", "connected", "has_connected"]),
+          forticare: pick(raw.forticare, ["status", "expires", "support_level"]),
+          antivirus: pick(raw.antivirus, ["status", "expires", "version"]),
+          ips: pick(raw.ips, ["status", "expires", "version"]),
+          web_filtering: pick(raw.web_filtering, ["status", "expires"]),
+          forticloud: pick(raw.forticloud, ["status"]),
+          vdom: pick(raw.vdom, ["used", "max", "can_upgrade"]),
+          _note: "health subset; pass verbose=true for full entitlement dump",
+        };
+        return textResult(bounded(data, "verbose=true for all entitlements.", getMaxResponseBytes()), {
+          device: name,
+          path: "monitor/license/status",
+        });
+      } catch (e: any) {
+        if (e?.name === "AbortError") throw e;
+        return textResult(`Error: ${e?.message || String(e)}`);
+      }
     },
   });
 }

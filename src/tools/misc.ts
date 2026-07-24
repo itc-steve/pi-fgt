@@ -6,8 +6,9 @@ import { Type } from "typebox";
 import { deviceParam, textResult } from "./helpers.js";
 import { resolveDevice, getToken, getMaxResponseBytes } from "../config.js";
 import { fortiGet, fortiResults } from "../client.js";
-import { bounded } from "../bounds.js";
+import { bounded, compactApps, projectOne } from "../bounds.js";
 import { clampPerPage } from "../validate.js";
+import { FORTIVIEW_KEEP } from "../types.js";
 
 export const MISC_TOOL_NAMES = [
   "get_license_fortianalyzer_status",
@@ -406,7 +407,9 @@ export function registerMiscTools(pi: ExtensionAPI): void {
     label: "FortiGate: Fortiview Statistics",
     description:
       "Fortiview realtime statistics (monitor/fortiview/realtime-statistics). " +
-      "report_by: source|dstaddr|device|… ; count clamped to 50. Read-only.",
+      "report_by: source|dstaddr|device|… ; count clamped to 50. " +
+      "Default projects ops fields + compact apps (verbose=true for full). " +
+      "On some builds report_by only sorts — rows may still be per src/dst pair.",
     promptSnippet: "FortiGate fortiview statistics",
     parameters: Type.Object({
       ...deviceParam,
@@ -415,6 +418,7 @@ export function registerMiscTools(pi: ExtensionAPI): void {
       ),
       sort_by: Type.Optional(Type.String({ description: "Sort by field (optional)" })),
       count: Type.Optional(Type.Number({ description: "Max rows (default 25, max 50)" })),
+      verbose: Type.Optional(Type.Boolean({ description: "Full FortiView fields" })),
     }),
     async execute(_id, params, signal) {
       try {
@@ -425,7 +429,24 @@ export function registerMiscTools(pi: ExtensionAPI): void {
           count: clampPerPage(params.count ?? 25),
         };
         if (params.sort_by != null) q.sort_by = params.sort_by;
-        let data = fortiResults(await fortiGet("monitor/fortiview/realtime-statistics", dev, token, q, signal));
+        let data: any = fortiResults(await fortiGet("monitor/fortiview/realtime-statistics", dev, token, q, signal));
+        // Project details[] when present
+        const rows = Array.isArray(data) ? data : Array.isArray(data?.details) ? data.details : null;
+        if (rows && !params.verbose) {
+          const projected = rows.map((row: any) => {
+            const out = projectOne(row, FORTIVIEW_KEEP);
+            const apps = compactApps(row.apps);
+            if (apps) out.apps = apps;
+            // apps with counts if available
+            if (Array.isArray(row.apps) && row.apps.some((a: any) => a?.count != null)) {
+              out.apps = row.apps
+                .map((a: any) => (a?.name ? `${a.name}${a.count != null ? `×${a.count}` : ""}` : null))
+                .filter(Boolean);
+            }
+            return out;
+          });
+          data = Array.isArray(data) ? projected : { ...data, details: projected };
+        }
         data = bounded(data, "Lower count or change report_by.", getMaxResponseBytes());
         return textResult(data, { device: name, path: "monitor/fortiview/realtime-statistics" });
       } catch (e: any) {

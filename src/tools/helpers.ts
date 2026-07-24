@@ -4,7 +4,7 @@ import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { resolveDevice, getToken, getMaxResponseBytes } from "../config.js";
 import { fortiGet, fortiResults } from "../client.js";
-import { bounded, hardCapText, project } from "../bounds.js";
+import { bounded, hardCapText, project, stripNoise } from "../bounds.js";
 import { summarizeResourceUsage } from "../summarize.js";
 
 export const deviceParam = {
@@ -35,6 +35,9 @@ export function textResult(data: unknown, details: Record<string, unknown> = {})
 	if (typeof data === "string") {
 		return { content: [{ type: "text", text: hardCapText(data, max) }], details };
 	}
+
+	// Global: drop q_origin_key + empty-string keys before bound/serialize
+	data = stripNoise(data);
 
 	// Bound once — callers may already have called bounded() with a better hint
 	let payload: unknown = alreadyBounded(data) ? data : bounded(data, defaultHint, max);

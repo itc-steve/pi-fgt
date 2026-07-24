@@ -6,8 +6,9 @@ import { Type } from "typebox";
 import { deviceParam, textResult } from "./helpers.js";
 import { resolveDevice, getToken, getMaxResponseBytes } from "../config.js";
 import { fortiGet, fortiResults } from "../client.js";
-import { bounded } from "../bounds.js";
+import { bounded, compactApps, project, projectOne } from "../bounds.js";
 import { clampPerPage } from "../validate.js";
+import { SESSION_KEEP, DHCP_KEEP, POLICY_HIT_KEEP } from "../types.js";
 
 export function registerNetworkTools(pi: ExtensionAPI): void {
   pi.registerTool({
@@ -72,13 +73,15 @@ export function registerNetworkTools(pi: ExtensionAPI): void {
     name: "get_dhcp_leases",
     label: "FortiGate: DHCP Leases",
     description:
-      "DHCP leases (monitor/system/dhcp). Optional ip/mac/interface filters (client-side).",
+      "DHCP leases (monitor/system/dhcp). Optional ip/mac/interface filters (client-side). " +
+      "Projected fields by default; verbose=true for full lease records.",
     promptSnippet: "FortiGate DHCP leases (filter by ip/mac)",
     parameters: Type.Object({
       ...deviceParam,
       ip: Type.Optional(Type.String({ description: "Filter by IP (exact or substring)" })),
       mac: Type.Optional(Type.String({ description: "Filter by MAC (substring, separators ignored)" })),
       interface: Type.Optional(Type.String({ description: "Filter by interface name (substring)" })),
+      verbose: Type.Optional(Type.Boolean({ description: "Full lease records (default: projected)" })),
     }),
     async execute(_toolCallId, params, signal, onUpdate, ctx) {
       const { name, device: dev } = resolveDevice(params.device);
@@ -99,6 +102,7 @@ export function registerNetworkTools(pi: ExtensionAPI): void {
             return true;
           });
         }
+        data = project(data, DHCP_KEEP, !!params.verbose);
       }
       return textResult(
         bounded(data, "Filter with ip=, mac=, or interface=.", getMaxResponseBytes()),
@@ -112,21 +116,22 @@ export function registerNetworkTools(pi: ExtensionAPI): void {
     label: "FortiGate: Firewall Sessions",
     description:
       "Active sessions (monitor/firewall/session) — who is talking to whom right now. " +
-      "Fields: saddr/daddr/sport/dport/proto/srcintf/dstintf/policyid/apps/bytes. " +
-      "source_ip/dest_ip are client-side filters on the fetched window " +
-      "(FortiOS 7.4 ignores server-side srcaddr filters). " +
-      "details is always a partial list — see summary.matched_count / _partial / _hint.",
+      "Default projects to saddr/daddr/ports/proto/intf/policyid/bytes/duration + compact apps. " +
+      "ALWAYS pass source_ip or dest_ip for host forensics (client-side on fetched window). " +
+      "verbose=true for full FortiOS fields. details is partial — see _hint.",
     promptSnippet: "FortiGate sessions",
     parameters: Type.Object({
       ...deviceParam,
       count: Type.Optional(Type.Number({ default: 25 })),
       source_ip: Type.Optional(Type.String({ description: "Filter by source IP (substring; client-side on fetched window)" })),
       dest_ip: Type.Optional(Type.String({ description: "Filter by dest IP (substring; client-side on fetched window)" })),
+      verbose: Type.Optional(Type.Boolean({ description: "Full session fields (default: projected ops fields)" })),
     }),
     async execute(_toolCallId, params, signal, onUpdate, ctx) {
       const c = clampPerPage(params.count || 25);
       const src = String(params.source_ip || "").trim().toLowerCase();
       const dst = String(params.dest_ip || "").trim().toLowerCase();
+      const verbose = !!params.verbose;
       // When filtering, fetch max page so client-side filter has a larger window
       const fetchCount = src || dst ? clampPerPage(50) : c;
       const q: Record<string, string | number> = { count: fetchCount, summary: "true" };
@@ -149,26 +154,20 @@ export function registerNetworkTools(pi: ExtensionAPI): void {
           });
           const matchedInWindow = details.length;
           details = details.slice(0, c);
+          if (!verbose) {
+            details = details.map((row: any) => {
+              const out = projectOne(row, SESSION_KEEP);
+              const apps = compactApps(row.apps);
+              if (apps) out.apps = apps;
+              return out;
+            });
+          }
           data = {
-            ...data,
             summary: {
-              ...(data.summary || {}),
-              // api matched_count is unfiltered — replace with window truth
               matched_count: matchedInWindow,
               session_count: sessionCount,
             },
             details,
-            _client_filter: {
-              source_ip: src || undefined,
-              dest_ip: dst || undefined,
-              note: "client-side on fetched window; FortiOS does not apply src/dst filters on this API",
-            },
-            _window: {
-              fetched,
-              session_count: sessionCount,
-              matched_in_window: matchedInWindow,
-              returned: details.length,
-            },
             _partial: true,
             _returned: details.length,
             _total_matched: matchedInWindow,
@@ -177,15 +176,25 @@ export function registerNetworkTools(pi: ExtensionAPI): void {
                 ? `No matches in first ${fetched} of ${sessionCount ?? "?"} sessions (client-side filter). Empty ≠ no such sessions — omit filter or retry.`
                 : `Filtered client-side within first ${fetched} of ${sessionCount ?? "?"} sessions; returned ${details.length}.`,
           };
-        } else if (typeof apiMatched === "number" && details.length < apiMatched) {
-          // Unfiltered: FortiOS already limited details to count — be explicit
-          data = {
-            ...data,
-            _partial: true,
-            _returned: details.length,
-            _total_matched: apiMatched,
-            _hint: `details is first ${details.length} of ${apiMatched} matched sessions; raise count (max 50) or filter source_ip/dest_ip.`,
-          };
+        } else {
+          if (!verbose) {
+            details = details.map((row: any) => {
+              const out = projectOne(row, SESSION_KEEP);
+              const apps = compactApps(row.apps);
+              if (apps) out.apps = apps;
+              return out;
+            });
+            data = { ...data, details };
+          }
+          if (typeof apiMatched === "number" && details.length < apiMatched) {
+            data = {
+              ...data,
+              _partial: true,
+              _returned: details.length,
+              _total_matched: apiMatched,
+              _hint: `details is first ${details.length} of ${apiMatched} matched sessions; raise count (max 50) or filter source_ip/dest_ip.`,
+            };
+          }
         }
       }
 
@@ -200,14 +209,19 @@ export function registerNetworkTools(pi: ExtensionAPI): void {
     label: "FortiGate: Policy Hit Counts",
     description:
       "Live policy counters: active_sessions/bytes/packets per policyid (monitor/firewall/policy). " +
-      "Correlate policyid with get_firewall_policies / get_firewall_policy. Zero hits ≠ policy disabled.",
+      "Default drops 1-week history arrays + asic/software/nturbo splits (verbose=true for full). " +
+      "Correlate policyid with get_firewall_policies. Zero hits ≠ policy disabled.",
     promptSnippet: "FortiGate policy hits",
-    parameters: Type.Object({ ...deviceParam }),
+    parameters: Type.Object({
+      ...deviceParam,
+      verbose: Type.Optional(Type.Boolean({ description: "Include week arrays + asic/software splits" })),
+    }),
     async execute(_toolCallId, params, signal, onUpdate, ctx) {
       const { name, device: dev } = resolveDevice(params.device);
       const token = getToken(dev);
       let data = fortiResults(await fortiGet("monitor/firewall/policy", dev, token, {}, signal));
-      return textResult(bounded(data, "Correlate with get_firewall_policy.", getMaxResponseBytes()), { device: name });
+      if (!params.verbose) data = project(data, POLICY_HIT_KEEP, false);
+      return textResult(bounded(data, "Correlate with get_firewall_policy; verbose=true for week history.", getMaxResponseBytes()), { device: name });
     },
   });
 }

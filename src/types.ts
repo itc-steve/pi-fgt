@@ -80,15 +80,17 @@ export const PHASE2_KEEP = new Set([
 ]);
 
 export const FORTIAP_KEEP = new Set([
-  "name", "serial", "wtp_id", "status", "state", "clients",
-  "local_ipv4_addr", "connecting_from", "connecting_interface",
+  "name", "serial", "status", "state", "clients",
+  "local_ipv4_addr", "connecting_interface",
   "board_mac", "join_time", "os_version", "ap_profile", "cpu_usage",
+  // dropped: wtp_id (dup serial), connecting_from (dup local_ipv4_addr)
 ]);
 
 export const WIFI_CLIENT_KEEP = new Set([
-  "mac", "ip", "ssid", "vap_name", "wtp_id", "wtp_name", "wtp_ip",
-  "hostname", "manufacturer", "os", "signal", "snr", "noise", "channel",
+  "mac", "ip", "ssid", "vap_name", "wtp_id", "wtp_ip",
+  "hostname", "manufacturer", "os", "signal", "snr", "channel",
   "vlan_id", "radio_type", "mimo", "bandwidth_tx", "bandwidth_rx",
+  // dropped: noise (constant), wtp_name (dup of wtp_id)
 ]);
 
 export const FORTISWITCH_KEEP = new Set([
@@ -100,6 +102,33 @@ export const SWITCH_PORT_KEEP = new Set([
   "interface", "status", "speed", "duplex", "vlan", "fortilink_port",
   "fgt_peer_port_name", "fgt_peer_device_name", "poe_status", "poe_capable",
   "port_power",
+]);
+
+/** Live session details — ops 5-tuple + policy + bytes (drops uuid/country/npu noise). */
+export const SESSION_KEEP = new Set([
+  "saddr", "sport", "daddr", "dport", "proto",
+  "srcintf", "dstintf", "policyid",
+  "duration", "sentbyte", "rcvdbyte",
+  // apps compacted separately via compactApps()
+]);
+
+/** DHCP lease ops fields. */
+export const DHCP_KEEP = new Set([
+  "ip", "mac", "hostname", "interface", "reserved", "status",
+  "ssid", "access_point", "expire_time", "vci",
+]);
+
+/** Policy hit counters — current only (week arrays behind verbose). */
+export const POLICY_HIT_KEEP = new Set([
+  "policyid", "active_sessions", "bytes", "packets", "hit_count", "last_used",
+]);
+
+/** FortiView realtime row. */
+export const FORTIVIEW_KEEP = new Set([
+  "srcaddr", "dstaddr", "sessions", "srcmac", "srcintf", "dstintf",
+  "dst_port", "protocol", "sentbyte", "rcvdbyte",
+  "tx_bandwidth", "rx_bandwidth",
+  // apps compacted separately
 ]);
 
 export const ALLOWED_PROFILE_TYPES: Record<string, string> = {

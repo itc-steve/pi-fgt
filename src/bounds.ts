@@ -9,17 +9,55 @@ export function clampPerPage(n: number, cap = PER_PAGE_CAP): number {
 	return clampPerPageValidate(n, cap);
 }
 
+/**
+ * Global noise strip for FortiOS JSON:
+ * - drop q_origin_key (always duplicates name)
+ * - drop empty-string keys (alias:"", comments:"", …)
+ * Applied on every tool response via textResult.
+ */
+export function stripNoise(value: unknown, depth = 0): unknown {
+	if (depth > 12) return value;
+	if (Array.isArray(value)) return value.map((v) => stripNoise(v, depth + 1));
+	if (!value || typeof value !== "object") return value;
+	const out: Record<string, unknown> = {};
+	for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+		if (k === "q_origin_key") continue;
+		if (v === "") continue;
+		out[k] = stripNoise(v, depth + 1);
+	}
+	return out;
+}
+
+/** Project one object to keep-set (non-array). */
+export function projectOne(item: any, keep: Set<string>): Record<string, any> {
+	const out: Record<string, any> = {};
+	if (!item || typeof item !== "object") return out;
+	for (const k of keep) {
+		if (k in item) out[k] = item[k];
+	}
+	return out;
+}
+
+/** apps[] → ["udp/53", …] (drop id/protocol/protocol_str/port siblings). */
+export function compactApps(apps: unknown): string[] | undefined {
+	if (!Array.isArray(apps) || apps.length === 0) return undefined;
+	const names = apps
+		.map((a: any) => {
+			if (!a || typeof a !== "object") return "";
+			if (a.name) return String(a.name);
+			const p = a.protocol_str || a.protocol || "";
+			const port = a.port != null ? a.port : "";
+			return p && port !== "" ? `${p}/${port}` : String(p || port || "");
+		})
+		.filter(Boolean);
+	return names.length ? names : undefined;
+}
+
 export function project(items: any, keep: Set<string>, verbose?: boolean): any {
 	if (verbose || !Array.isArray(items)) return items;
 	return items
 		.filter((item: any) => item && typeof item === "object")
-		.map((item: any) => {
-			const out: Record<string, any> = {};
-			for (const k of keep) {
-				if (k in item) out[k] = item[k];
-			}
-			return out;
-		});
+		.map((item: any) => projectOne(item, keep));
 }
 
 function jsonSize(payload: unknown): number {

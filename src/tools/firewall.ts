@@ -236,16 +236,18 @@ export function registerFirewallTools(pi: ExtensionAPI): void {
 	pi.registerTool({
 		name: "get_interfaces_config",
 		label: "FortiGate: Interfaces Config",
-		description: "Interface config (cmdb/system/interface).",
+		description:
+			"Interface config (cmdb/system/interface). " +
+			"Use name= for a single VLAN/iface (e.g. name=Work) — catalog is often 20+ rows.",
 		promptSnippet: "FortiGate interface config",
-		parameters: Type.Object({ ...deviceParam, verbose: verboseParam }),
+		parameters: Type.Object({ ...deviceParam, name: nameFilterParam, verbose: verboseParam }),
 		async execute(_id, params, signal) {
 			return cmdbList(
 				"cmdb/system/interface",
 				params,
 				signal,
 				IFACE_KEEP,
-				"Set verbose=True for full fields, or get_config_object('system/interface/<name>').",
+				"Filter with name=; set verbose=true for full fields.",
 			);
 		},
 	});

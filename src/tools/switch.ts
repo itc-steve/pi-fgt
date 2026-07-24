@@ -67,7 +67,8 @@ export function registerSwitchTools(pi: ExtensionAPI): void {
 		name: "get_switch_port_status",
 		label: "FortiGate: Switch Ports",
 		description:
-			"FortiSwitch port status (from managed-switch/status). Optional switch serial filter and up-only.",
+			"FortiSwitch port status (from managed-switch/status). " +
+			"Prefer up_only=true for 'what's connected' (~80% smaller); full list only for down-port audits.",
 		promptSnippet: "FortiGate FortiSwitch port status",
 		parameters: Type.Object({
 			...deviceParam,

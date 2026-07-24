@@ -112,6 +112,15 @@ Use `list_fortigate_devices` if unsure — do not read `fortigate.json` for secr
 - Response size cap + field projection
 - Tokens only via env / fortigate.env
 
+## Token-conscious responses (v1.1)
+
+Default tool output is projected for network-engineering triage:
+
+- Global strip of `q_origin_key` and empty-string keys
+- Sessions / FortiView / policy hits / DHCP / licenses / rogue APs / traffic logs → ops fields only
+- Pass `verbose=true` when you need full FortiOS rows
+- Prefer filters (`source_ip`, `name=`, `up_only=true`, `live_only=true`) before dumping catalogs
+
 ## Tools
 
 191 read-only tools. GET only. Grouped by `src/tools/*.ts`:
