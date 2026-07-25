@@ -24,32 +24,39 @@ FortiGate tools register at load but stay **inactive by default** each new sessi
 
 | Command | Effect |
 |---------|--------|
-| `/fortigate on` | Enable all tools **this session** |
-| `/fortigate off` | Disable for this session |
-| `/fortigate` or `/fortigate toggle` | Flip on/off |
-| `/fortigate status` | Show on/off + visible/hidden devices |
-| `/fortigate devices` | **Interactive picker** — toggle each FortiGate visible/hidden |
+| `/fortigate` or `/fortigate on` | Enable tools **and open the device picker** for this session |
+| `/fortigate off` | Disable tools and clear the device selection |
+| `/fortigate toggle` | Off → on+picker, on → off |
+| `/fortigate status` | Show on/off + which devices the AI can see |
 
-## Device visibility (`/fortigate devices`)
+## Device selection (the picker)
 
-Opens a checkbox picker (↑↓ move, enter/space toggle, `/` search, esc close).
-Hidden devices are **invisible to the AI**: not listed by `list_fortigate_devices`,
-not resolvable by any tool. This stops the model getting confused by FortiGates
-you don't want it touching — **without editing `fortigate.json`**.
+**Every FortiGate is hidden from the AI by default, every session.** `/fortigate`
+and `/fortigate on` open a picker (↑↓ move, enter/space toggle, `/` search, esc
+done) where you turn on just the devices this session should expose.
 
-Visibility is **persistent** across sessions/restarts, stored in
-`~/.pi/agent/fortigate.state.json` (`{ "hidden": ["device-key", …] }`).
-Unhide any time via the picker.
+Unselected devices are invisible to the *model*: not listed by
+`list_fortigate_devices`, not resolvable by any tool. You still see all of them
+in the picker — it hides them from the AI, not from you. The point is to stop
+the model getting confused when it has to match your loose wording ("the edge
+one") against a long list of FortiGates.
 
-`/new` or new session → back to `sessionDefault` (default **off**). Must `/fortigate on` again.
+Selection is **in-memory and per pi session**:
 
-Config knob:
+- Nothing is written to disk — there is no state file and no save command.
+- Other pi terminals are unaffected; each session picks its own devices.
+- `/new`, restart, or `/fortigate off` → back to all-hidden.
+- **No config setting can pre-select a device.** `fortigate.json` defines what
+  *exists*; only the picker decides what the AI *sees*.
+
+Config knob (tools only — does not affect device visibility):
 
 ```json
 "sessionDefault": "off"
 ```
 
-Set `"on"` only if you want tools auto-enabled every session (not recommended).
+Set `"on"` to auto-activate the tools each session; devices still start hidden
+until you run `/fortigate`.
 
 ## Config (two files side by side)
 
@@ -97,7 +104,8 @@ Token resolve order:
 Never put the token string in the JSON.
 
 Every tool accepts optional `device` (name key). Omit only when exactly one
-device is visible; otherwise pass `device=`. Device names are matched
+device is selected for the session; otherwise pass `device=`.
+Devices not selected in `/fortigate` are not resolvable at all. Device names are matched
 case-insensitively, by unique substring, and by word tokens (e.g. `edge`
 or `edge fw` → `edge-fw`; `dc core` → `dc-core-fw`).
 Ambiguous input lists the candidates instead of guessing.
@@ -111,6 +119,15 @@ Use `list_fortigate_devices` if unsure — do not read `fortigate.json` for secr
 - Path/name validation on escape hatches + ids
 - Response size cap + field projection
 - Tokens only via env / fortigate.env
+- Device exposure is opt-in per session, in-memory, never persisted
+
+## Session-scoped device exposure (v1.2)
+
+Device visibility used to live in `~/.pi/agent/fortigate.state.json`, which was
+read and rewritten globally — toggling a device in one terminal silently changed
+every other running pi session. That file is gone. Selection is now in-memory,
+per session, all-hidden until you pick. Safe to delete any leftover
+`~/.pi/agent/fortigate.state.json`; it is no longer read.
 
 ## Token-conscious responses (v1.1)
 

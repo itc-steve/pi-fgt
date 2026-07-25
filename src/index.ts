@@ -1,12 +1,14 @@
 /**
  * pi-fgt entry.
  * Registers all FortiGate tools, then keeps them OFF by default each session.
- * Toggle with: /fortigate [on|off|toggle|status]
+ * Every device also starts hidden from the AI; /fortigate and /fortigate on
+ * open the picker so the human chooses which FortiGates this session exposes.
+ * Selection is in-memory only — never saved, never shared between terminals.
  * Footer status only shows when ON.
  */
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { loadConfig, listDevices } from "./config.js";
+import { loadConfig, listDevices, resetSessionVisibility } from "./config.js";
 import { showDevicePicker } from "./device-picker.js";
 import { FORTIGATE_TOOL_NAMES, FORTIGATE_TOOL_NAME_SET } from "./tool-names.js";
 import { registerSystemTools } from "./tools/system.js";
@@ -65,7 +67,7 @@ function updateStatus(ctx: ExtensionContext): void {
 	}
 	try {
 		const devs = listDevices().map((d) => d.name);
-		const devPart = devs.length > 0 ? devs.join(", ") : "no visible devices";
+		const devPart = devs.length > 0 ? devs.join(", ") : "no devices selected";
 		ctx.ui.setStatus("fortigate", `fortigate: ON (${devPart})`);
 	} catch {
 		ctx.ui.setStatus("fortigate", "fortigate: ON");
@@ -101,6 +103,7 @@ export default function (pi: ExtensionAPI): void {
 
 	pi.on("session_start", (_event, ctx) => {
 		try {
+			resetSessionVisibility();
 			const cfg = loadConfig(true);
 			const wantOn = cfg.sessionDefault === "on";
 			setFortiGateEnabled(pi, wantOn);
@@ -111,27 +114,52 @@ export default function (pi: ExtensionAPI): void {
 		}
 	});
 
+	/** Turn tools on and let the human pick which FortiGates the AI may see. */
+	const enableAndPick = async (ctx: ExtensionContext) => {
+		setFortiGateEnabled(pi, true);
+		if (!ctx.hasUI) {
+			updateStatus(ctx);
+			ctx.ui.notify(
+				"FortiGate tools ON, but device selection needs an interactive UI — no devices are visible to the AI.",
+				"warn",
+			);
+			return;
+		}
+		const selected = await showDevicePicker(ctx);
+		updateStatus(ctx);
+		ctx.ui.notify(
+			selected.length
+				? `FortiGate ON — AI can see: [${selected.join(", ")}]`
+				: "FortiGate ON — no devices selected, so the AI sees none. Run /fortigate again to pick.",
+			selected.length ? "success" : "warn",
+		);
+	};
+
 	const handleCommand = async (args: unknown, ctx: ExtensionContext) => {
-		const cmd = parseArgs(args) || "toggle";
+		const cmd = parseArgs(args);
 		const currentlyOn = isFortiGateActive(pi);
 
-		if (cmd === "devices" || cmd === "d" || cmd === "select" || cmd === "pick") {
-			if (!ctx.hasUI) {
-				ctx.ui.notify("Device picker needs an interactive UI.", "warn");
-				return;
-			}
-			await showDevicePicker(ctx);
-			updateStatus(ctx);
+		// Bare /fortigate, /fortigate on, /fortigate devices → enable + pick.
+		if (
+			!cmd ||
+			cmd === "on" ||
+			cmd === "enable" ||
+			cmd === "1" ||
+			cmd === "devices" ||
+			cmd === "d" ||
+			cmd === "select" ||
+			cmd === "pick"
+		) {
+			await enableAndPick(ctx);
 			return;
 		}
 
 		if (cmd === "status" || cmd === "s") {
 			const cfg = loadConfig();
-			const visible = listDevices().map((d) => d.name);
+			const selected = listDevices().map((d) => d.name);
 			const total = Object.keys(cfg.devices || {}).length;
-			const hiddenCount = total - visible.length;
 			ctx.ui.notify(
-				`FortiGate tools: ${currentlyOn ? "ON" : "OFF"} | sessionDefault=${cfg.sessionDefault ?? "off"} | visible=[${visible.join(", ") || "none"}]${hiddenCount > 0 ? ` | ${hiddenCount} hidden` : ""}`,
+				`FortiGate tools: ${currentlyOn ? "ON" : "OFF"} | AI can see ${selected.length}/${total}: [${selected.join(", ") || "none"}]`,
 				"info",
 			);
 			enabledThisSession = currentlyOn;
@@ -139,43 +167,38 @@ export default function (pi: ExtensionAPI): void {
 			return;
 		}
 
-		if (cmd === "on" || cmd === "enable" || cmd === "1") {
-			setFortiGateEnabled(pi, true);
-			updateStatus(ctx);
-			ctx.ui.notify("FortiGate tools ON (this session)", "success");
-			return;
-		}
-
 		if (cmd === "off" || cmd === "disable" || cmd === "0") {
 			setFortiGateEnabled(pi, false);
+			resetSessionVisibility();
 			updateStatus(ctx);
-			ctx.ui.notify("FortiGate tools OFF (this session)", "info");
+			ctx.ui.notify("FortiGate tools OFF, device selection cleared", "info");
 			return;
 		}
 
 		if (cmd === "toggle" || cmd === "t") {
-			const next = !currentlyOn;
-			setFortiGateEnabled(pi, next);
-			updateStatus(ctx);
-			ctx.ui.notify(
-				next ? "FortiGate tools ON (this session)" : "FortiGate tools OFF (this session)",
-				next ? "success" : "info",
-			);
+			if (currentlyOn) {
+				setFortiGateEnabled(pi, false);
+				resetSessionVisibility();
+				updateStatus(ctx);
+				ctx.ui.notify("FortiGate tools OFF, device selection cleared", "info");
+			} else {
+				await enableAndPick(ctx);
+			}
 			return;
 		}
 
 		ctx.ui.notify(
-			"Usage: /fortigate [on|off|toggle|status|devices]  — 'devices' opens the visibility picker. Default each session is off.",
+			"Usage: /fortigate [on|off|toggle|status]  — /fortigate opens the device picker. Devices are hidden from the AI until you select them, every session, never saved.",
 			"warn",
 		);
 	};
 
 	const SUBCOMMANDS: Array<{ value: string; description: string }> = [
-		{ value: "on", description: "Enable FortiGate tools this session" },
-		{ value: "off", description: "Disable FortiGate tools this session" },
-		{ value: "toggle", description: "Flip FortiGate tools on/off" },
-		{ value: "status", description: "Show on/off + visible/hidden devices" },
-		{ value: "devices", description: "Open the device visibility picker" },
+		{ value: "on", description: "Enable FortiGate tools + pick devices for this session" },
+		{ value: "off", description: "Disable FortiGate tools and clear device selection" },
+		{ value: "toggle", description: "Flip FortiGate tools on (with picker) / off" },
+		{ value: "status", description: "Show on/off + which devices the AI can see" },
+		{ value: "devices", description: "Open the device picker (same as /fortigate)" },
 	];
 
 	const getArgumentCompletions = (prefix: string) => {
@@ -190,7 +213,7 @@ export default function (pi: ExtensionAPI): void {
 
 	pi.registerCommand("fortigate", {
 		description:
-			"FortiGate tools: /fortigate [on|off|toggle|status|devices]",
+			"FortiGate tools + device picker: /fortigate [on|off|toggle|status]",
 		getArgumentCompletions,
 		handler: handleCommand as any,
 	});

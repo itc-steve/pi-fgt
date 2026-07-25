@@ -4,15 +4,13 @@
  *  Resolution order for tokens: process.env[tokenEnv] first, then fortigate.env.
  */
 
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { DeviceConfig, FortiConfig } from "./types.js";
 
 const AGENT_DIR = join(process.env.HOME || process.env.USERPROFILE || "~", ".pi", "agent");
 const CONFIG_PATH = join(AGENT_DIR, "fortigate.json");
 const ENV_PATH = join(AGENT_DIR, "fortigate.env");
-/** Persistent per-device visibility. Separate from hand-edited fortigate.json. */
-const STATE_PATH = join(AGENT_DIR, "fortigate.state.json");
 
 let cached: FortiConfig | null = null;
 let cacheTime = 0;
@@ -28,56 +26,38 @@ export function envPath(): string {
   return ENV_PATH;
 }
 
-export function statePath(): string {
-  return STATE_PATH;
-}
-
 // ---------------------------------------------------------------------------
-// Visibility state (~/.pi/agent/fortigate.state.json). Hidden devices are
-// invisible to the AI: not listed, not resolvable. Never edits fortigate.json.
+// Device exposure — SESSION-LOCAL, IN-MEMORY, NEVER PERSISTED.
+//
+// Every device starts hidden from the AI. The human selects which ones this
+// session may see via /fortigate (the picker). One pi process = one session,
+// so this Set is the isolation boundary: other terminals are untouched, and
+// nothing on disk (fortigate.json included) can pre-enable a device.
+//
+// "Hidden" means hidden from the MODEL: not listed, not resolvable. The human
+// always sees every configured device in the picker.
 // ---------------------------------------------------------------------------
 
-interface FortiState {
-  hidden: string[];
+const enabled = new Set<string>();
+
+/** Drop all selections (call on session_start — back to all-hidden). */
+export function resetSessionVisibility(): void {
+  enabled.clear();
 }
 
-function readState(): FortiState {
-  if (!existsSync(STATE_PATH)) return { hidden: [] };
-  try {
-    const parsed = JSON.parse(readFileSync(STATE_PATH, "utf-8"));
-    const hidden = Array.isArray(parsed?.hidden)
-      ? parsed.hidden.filter((x: unknown) => typeof x === "string")
-      : [];
-    return { hidden };
-  } catch {
-    return { hidden: [] };
-  }
+/** Device keys the AI may see this session. */
+export function enabledDevices(): Set<string> {
+  return new Set(enabled);
 }
 
-function writeState(state: FortiState): void {
-  const uniq = [...new Set(state.hidden)];
-  writeFileSync(STATE_PATH, JSON.stringify({ hidden: uniq }, null, 2) + "\n", {
-    mode: 0o600,
-  });
+export function isDeviceEnabled(name: string): boolean {
+  return enabled.has(name);
 }
 
-/** Set of hidden device keys (exact config keys). */
-export function hiddenDevices(): Set<string> {
-  return new Set(readState().hidden);
-}
-
-export function isDeviceHidden(name: string): boolean {
-  return hiddenDevices().has(name);
-}
-
-/** Persistently show/hide a device by exact config key. Returns new hidden state. */
-export function setDeviceHidden(name: string, hidden: boolean): boolean {
-  const state = readState();
-  const set = new Set(state.hidden);
-  if (hidden) set.add(name);
-  else set.delete(name);
-  writeState({ hidden: [...set] });
-  return hidden;
+/** Expose/hide a device from the AI for this session only. */
+export function setDeviceEnabled(name: string, on: boolean): void {
+  if (on) enabled.add(name);
+  else enabled.delete(name);
 }
 
 /** Parse KEY=VALUE dotenv (no export keyword required). Quotes stripped. # comments ok. */
@@ -196,19 +176,16 @@ export function loadConfig(force = false): FortiConfig {
   return cfg;
 }
 
-/** Visible (non-hidden) device keys in config order. */
+/** Device keys selected for the AI this session, in config order. */
 function visibleKeys(cfg: FortiConfig): string[] {
-  const hidden = hiddenDevices();
-  return Object.keys(cfg.devices).filter((k) => !hidden.has(k));
+  return Object.keys(cfg.devices).filter((k) => enabled.has(k));
 }
 
 function deviceListHint(cfg: FortiConfig): string {
   const keys = visibleKeys(cfg);
-  const hiddenCount = Object.keys(cfg.devices).length - keys.length;
-  const hiddenNote = hiddenCount > 0 ? ` (${hiddenCount} hidden — /fortigate devices to change)` : "";
   return keys.length
-    ? `Visible devices: [${keys.join(", ")}]${hiddenNote}. Use list_fortigate_devices; pass device= (omit only if exactly one is visible).`
-    : `No visible devices${hiddenNote}. Configure ~/.pi/agent/fortigate.json or unhide with /fortigate devices.`;
+    ? `Selected devices: [${keys.join(", ")}]. Use list_fortigate_devices; pass device= (omit only if exactly one is selected).`
+    : `No FortiGate devices selected for this session. The user must run /fortigate and pick one — ask them to.`;
 }
 
 /** Tokenize a device key into lowercase word parts (split on non-alphanumeric). */
@@ -275,15 +252,17 @@ export function resolveDevice(name?: string): { name: string; device: DeviceConf
     );
   }
 
-  // Hidden-device hint: help the human, don't silently 404
+  // Configured but not selected: tell the model to ask, don't silently 404
   if (cfg.devices[raw] || Object.keys(cfg.devices).some((k) => k.toLowerCase() === lower)) {
-    throw new Error(`Device "${raw}" is hidden. Unhide with /fortigate devices. ${deviceListHint(cfg)}`);
+    throw new Error(
+      `Device "${raw}" is not selected for this session. Ask the user to run /fortigate and select it. ${deviceListHint(cfg)}`,
+    );
   }
 
   throw new Error(`Device "${raw}" not found. ${deviceListHint(cfg)}`);
 }
 
-/** Public VISIBLE device names only (no URLs/tokens). Hidden devices excluded. */
+/** Device names the AI may see (no URLs/tokens). Unselected devices excluded. */
 export function listDevices(): Array<{ name: string; vdom: string }> {
   const cfg = loadConfig();
   return visibleKeys(cfg).map((name) => ({
@@ -292,14 +271,13 @@ export function listDevices(): Array<{ name: string; vdom: string }> {
   }));
 }
 
-/** All configured devices with visibility flag — for the picker/status only. */
-export function listAllDevices(): Array<{ name: string; vdom: string; hidden: boolean; url: string }> {
+/** All configured devices with selection flag — for the picker/status only. */
+export function listAllDevices(): Array<{ name: string; vdom: string; enabled: boolean; url: string }> {
   const cfg = loadConfig();
-  const hidden = hiddenDevices();
   return Object.keys(cfg.devices).map((name) => ({
     name,
     vdom: cfg.devices[name].vdom || "root",
-    hidden: hidden.has(name),
+    enabled: enabled.has(name),
     url: cfg.devices[name].url,
   }));
 }

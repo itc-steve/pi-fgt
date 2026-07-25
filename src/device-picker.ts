@@ -1,41 +1,47 @@
 /**
- * Interactive FortiGate visibility picker (/fortigate devices).
- * SettingsList with per-device visible/hidden toggle. Persists to
- * ~/.pi/agent/fortigate.state.json via setDeviceHidden. Hidden devices are
- * invisible to the AI (not listed, not resolvable) — no fortigate.json edits.
+ * Interactive FortiGate device selector (/fortigate).
+ * SettingsList with a per-device off/on toggle. SESSION-LOCAL and in-memory:
+ * nothing is written to disk, other pi terminals are unaffected, and every
+ * session starts with all devices off. "off" = hidden from the AI (not listed,
+ * not resolvable) — the human always sees the full list here.
+ *
+ * Returns the device names selected when the picker closed.
  */
 
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { getSettingsListTheme } from "@earendil-works/pi-coding-agent";
 import { Container, type SettingItem, SettingsList, Text } from "@earendil-works/pi-tui";
-import { listAllDevices, setDeviceHidden } from "./config.js";
+import { listAllDevices, setDeviceEnabled } from "./config.js";
 
-export async function showDevicePicker(ctx: ExtensionContext): Promise<void> {
+export async function showDevicePicker(ctx: ExtensionContext): Promise<string[]> {
 	const devices = listAllDevices();
 	if (devices.length === 0) {
 		ctx.ui.notify(
 			"No FortiGate devices configured. Edit ~/.pi/agent/fortigate.json first.",
 			"warn",
 		);
-		return;
+		return [];
 	}
 
 	const items: SettingItem[] = devices.map((d) => ({
 		id: d.name,
 		label: d.name,
 		description: d.url,
-		currentValue: d.hidden ? "hidden" : "visible",
-		values: ["visible", "hidden"],
+		currentValue: d.enabled ? "on" : "off",
+		values: ["off", "on"],
 	}));
 
 	await ctx.ui.custom<void>((_tui, theme, _kb, done) => {
 		const container = new Container();
 		container.addChild(
-			new Text(theme.fg("accent", theme.bold("FortiGate device visibility")), 1, 1),
+			new Text(theme.fg("accent", theme.bold("Select FortiGates for this session")), 1, 1),
 		);
 		container.addChild(
 			new Text(
-				theme.fg("muted", "Hidden devices are invisible to the AI (not listed, not usable)."),
+				theme.fg(
+					"muted",
+					"Only devices set to 'on' are visible to the AI. This session only — never saved.",
+				),
 				1,
 				0,
 			),
@@ -46,7 +52,7 @@ export async function showDevicePicker(ctx: ExtensionContext): Promise<void> {
 			Math.min(items.length + 2, 15),
 			getSettingsListTheme(),
 			(id, newValue) => {
-				setDeviceHidden(id, newValue === "hidden");
+				setDeviceEnabled(id, newValue === "on");
 			},
 			() => done(undefined),
 			{ enableSearch: true },
@@ -54,7 +60,7 @@ export async function showDevicePicker(ctx: ExtensionContext): Promise<void> {
 		container.addChild(list);
 		container.addChild(
 			new Text(
-				theme.fg("dim", "↑↓ move • enter/space toggle • / search • esc close"),
+				theme.fg("dim", "↑↓ move • enter/space toggle • / search • esc done"),
 				1,
 				0,
 			),
@@ -70,12 +76,7 @@ export async function showDevicePicker(ctx: ExtensionContext): Promise<void> {
 		};
 	});
 
-	const after = listAllDevices();
-	const visible = after.filter((d) => !d.hidden).map((d) => d.name);
-	ctx.ui.notify(
-		visible.length
-			? `FortiGate visible: [${visible.join(", ")}]`
-			: "All FortiGate devices hidden.",
-		"info",
-	);
+	return listAllDevices()
+		.filter((d) => d.enabled)
+		.map((d) => d.name);
 }
