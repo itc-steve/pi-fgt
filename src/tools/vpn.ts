@@ -6,8 +6,7 @@ import { Type } from "typebox";
 import { deviceParam, runForti, textResult } from "./helpers.js";
 import { resolveDevice, getToken, getMaxResponseBytes } from "../config.js";
 import { fortiGet, fortiResults } from "../client.js";
-import { bounded, project } from "../bounds.js";
-import { PHASE1_KEEP, PHASE2_KEEP } from "../types.js";
+import { bounded } from "../bounds.js";
 
 export function registerVpnTools(pi: ExtensionAPI): void {
   pi.registerTool({
@@ -20,7 +19,6 @@ export function registerVpnTools(pi: ExtensionAPI): void {
       const { name, device: dev } = resolveDevice(params.device);
       const token = getToken(dev);
       let data = fortiResults(await fortiGet("cmdb/vpn.ipsec/phase1-interface", dev, token, {}, signal));
-      data = project(data, PHASE1_KEEP, params.verbose);
       return textResult(bounded(data, "verbose=true for full fields.", getMaxResponseBytes()), { device: name });
     },
   });
@@ -35,7 +33,6 @@ export function registerVpnTools(pi: ExtensionAPI): void {
       const { name, device: dev } = resolveDevice(params.device);
       const token = getToken(dev);
       let data = fortiResults(await fortiGet("cmdb/vpn.ipsec/phase2-interface", dev, token, {}, signal));
-      data = project(data, PHASE2_KEEP, params.verbose);
       return textResult(bounded(data, "verbose=true for full.", getMaxResponseBytes()), { device: name });
     },
   });

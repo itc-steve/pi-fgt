@@ -6,8 +6,7 @@ import { Type } from "typebox";
 import { deviceParam, textResult } from "./helpers.js";
 import { resolveDevice, getToken, getMaxResponseBytes } from "../config.js";
 import { fortiGet, fortiResults } from "../client.js";
-import { bounded, project } from "../bounds.js";
-import { FORTIAP_KEEP, WIFI_CLIENT_KEEP } from "../types.js";
+import { bounded } from "../bounds.js";
 
 export function registerWirelessTools(pi: ExtensionAPI): void {
 	pi.registerTool({
@@ -27,7 +26,6 @@ export function registerWirelessTools(pi: ExtensionAPI): void {
 			let data = fortiResults(
 				await fortiGet("monitor/wifi/managed_ap", dev, token, {}, signal),
 			);
-			data = project(data, FORTIAP_KEEP, !!params.verbose);
 			data = bounded(
 				data,
 				"Use verbose=true for radios, or get_wifi_clients for stations.",
@@ -78,7 +76,6 @@ export function registerWirelessTools(pi: ExtensionAPI): void {
 					});
 				}
 			}
-			data = project(data, WIFI_CLIENT_KEEP, !!params.verbose);
 			data = bounded(
 				data,
 				"Filter with ap= or ssid= to narrow large client lists.",

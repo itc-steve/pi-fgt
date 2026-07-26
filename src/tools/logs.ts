@@ -24,40 +24,6 @@ const DEFAULT_SUBTYPE: Record<string, string> = {
 	utm: "webfilter",
 };
 
-/** Fields engineers usually need; full rows are huge (esp. FAZ). */
-const LOG_KEEP = [
-	"date",
-	"time",
-	"action",
-	"policyid",
-	"srcip",
-	"srcport",
-	"srcintf",
-	"srcname",
-	"dstip",
-	"dstport",
-	"dstintf",
-	"dstname",
-	"service",
-	"proto",
-	"app",
-	"duration",
-	"sentbyte",
-	"rcvdbyte",
-	"user",
-	"msg",
-	"logdesc",
-	"reason",
-	"sessionid",
-	"url",
-	"hostname",
-	"catdesc",
-	"attack",
-	"severity",
-	// dropped from default: itime/type/subtype/level/appcat/logid/vd/devname/
-	// srccountry/dstcountry (often "Reserved") — use verbose=true for full FAZ rows
-] as const;
-
 function sleep(ms: number, signal?: AbortSignal): Promise<void> {
 	return new Promise((resolve, reject) => {
 		if (signal?.aborted) {
@@ -112,17 +78,10 @@ function resolveLogSegments(
 	return { type: lt, subtype: st };
 }
 
-function projectLogRow(row: any, verbose: boolean): any {
-	if (verbose || !row || typeof row !== "object") return row;
-	const out: Record<string, unknown> = {};
-	for (const k of LOG_KEEP) {
-		if (k in row && row[k] != null && row[k] !== "") out[k] = row[k];
-	}
-	// always keep type/subtype/action if present even when empty string
-	for (const k of ["type", "subtype", "action", "policyid"] as const) {
-		if (k in row) out[k] = row[k];
-	}
-	return out;
+// Field selection is config-driven (filters tools.get_logs.allowlist).
+// ponytail: kept as a pass-through so callers/signature stay untouched.
+function projectLogRow(row: any, _verbose: boolean): any {
+	return row;
 }
 
 /**

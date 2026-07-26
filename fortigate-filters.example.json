@@ -1,0 +1,590 @@
+{
+  "$comment": [
+    "GENERATED from src/filters/defaults.ts — do not hand-edit; run `npm run filters:example`.",
+    "Copy this to ~/.pi/agent/fortigate-filters.json to customize.",
+    "Applied AFTER the FortiGate answers, BEFORE the model sees the data.",
+    "Precedence: tools[].keep > dropKeys > dropPrefixes/dropSuffixes > dropValues > dropEmpty.",
+    "A group with exclude:true is REMOVED from responses. Flip to false to get it back.",
+    "Your file is deep-merged over these defaults, so you only need the keys you change."
+  ],
+  "enabled": true,
+  "global": {
+    "dropEmpty": {
+      "emptyString": true,
+      "emptyArray": true,
+      "emptyObject": true,
+      "nullValue": true
+    },
+    "dropValues": {
+      "byValue": [
+        "0.0.0.0",
+        "0.0.0.0 0.0.0.0",
+        "::",
+        "::/0",
+        "00:00:00:00:00:00"
+      ],
+      "disableDefaults": false
+    },
+    "dropKeys": [
+      "q_origin_key"
+    ],
+    "dropPrefixes": [],
+    "dropSuffixes": []
+  },
+  "groups": {
+    "uuid": {
+      "exclude": true,
+      "why": "Opaque 128-bit IDs. Useless to humans; needed only for FortiManager / log correlation.",
+      "keys": [
+        "uuid",
+        "uuid-idx",
+        "src_uuid",
+        "dst_uuid",
+        "src_uuid_type",
+        "dst_uuid_type"
+      ]
+    },
+    "ipv6": {
+      "exclude": true,
+      "why": "IPv6 config blocks on v4-only networks. ~1400 chars per interface.",
+      "keys": [
+        "ipv6",
+        "srcaddr6",
+        "dstaddr6",
+        "poolname6",
+        "ip6",
+        "ipv6_gateway"
+      ],
+      "prefixes": [
+        "ip6-",
+        "dhcp6-",
+        "vrrp6",
+        "vrip6",
+        "internet-service6",
+        "trust-ip6-"
+      ],
+      "suffixes": [
+        "6-negate"
+      ]
+    },
+    "ztna": {
+      "exclude": true,
+      "why": "Zero-trust fields present on every policy even when ZTNA is unlicensed.",
+      "prefixes": [
+        "ztna-"
+      ]
+    },
+    "qos": {
+      "exclude": true,
+      "why": "DiffServ / ToS / VLAN-CoS markers, almost always at defaults.",
+      "prefixes": [
+        "diffserv",
+        "tos",
+        "vlan-cos-"
+      ]
+    },
+    "legacy_dialup": {
+      "exclude": true,
+      "why": "PPTP / L2TP / PPPoE-LCP fields on interfaces. Dead protocols on modern edges.",
+      "prefixes": [
+        "pptp-",
+        "l2tp-",
+        "lcp-",
+        "pppoe-",
+        "padt-",
+        "disc-retry-",
+        "ntlm"
+      ],
+      "keys": [
+        "l2tp-client",
+        "l2tp-client-settings",
+        "ipunnumbered",
+        "idle-timeout"
+      ]
+    },
+    "nat_edge_cases": {
+      "exclude": true,
+      "why": "PCP, RTP pinholing, STUN permits — niche NAT knobs.",
+      "prefixes": [
+        "pcp-",
+        "rtp-"
+      ],
+      "keys": [
+        "permit-any-host",
+        "permit-stun-host",
+        "wccp",
+        "fec"
+      ]
+    },
+    "negate_flags": {
+      "exclude": true,
+      "why": "srcaddr-negate, service-negate etc. Rarely enabled, 9 keys per policy.",
+      "suffixes": [
+        "-negate"
+      ]
+    },
+    "duplicate_identity": {
+      "exclude": true,
+      "why": "Fields that repeat a value already present under another key.",
+      "keys": [
+        "wtp_name",
+        "switch_serial",
+        "connecting_from",
+        "non_rc_gateway",
+        "wtp_control_local_ip",
+        "host",
+        "protocol_str"
+      ]
+    },
+    "wifi_micro_telemetry": {
+      "exclude": true,
+      "why": "Per-client MCS index, rate scores, 802.11k/v/r flags. Only useful in deep RF debug.",
+      "keys": [
+        "sta_rxrate_mcs",
+        "sta_txrate_mcs",
+        "sta_rxrate_score",
+        "sta_txrate_score",
+        "sta_maxrate",
+        "11k_capable",
+        "11v_capable",
+        "11r_capable",
+        "encrypt",
+        "security",
+        "captive_portal_authenticated",
+        "uses_captive_portal",
+        "lan_authenticated"
+      ]
+    },
+    "wifi_rf_floor": {
+      "exclude": false,
+      "why": "noise / noise_floor. Kept ON — needed for real RF troubleshooting even though it is usually a constant -95.",
+      "keys": [
+        "noise",
+        "noise_floor"
+      ]
+    },
+    "session_forensics": {
+      "exclude": false,
+      "why": "country, srcmac, dstmac on live sessions. Kept ON — geo triage and MAC<->IP correlation are normal ops tasks.",
+      "keys": [
+        "country",
+        "country_id",
+        "srcmac",
+        "dstmac"
+      ]
+    },
+    "internal_ids": {
+      "exclude": true,
+      "why": "FortiOS-internal indexes with no operator meaning.",
+      "keys": [
+        "server_mkey",
+        "server_ipam_enabled",
+        "devindex",
+        "vindex",
+        "snmp-index",
+        "app_list_id",
+        "swc-vlan",
+        "swc-first-create",
+        "internal",
+        "vf",
+        "cli-conn-status",
+        "ping-serv-status"
+      ]
+    },
+    "switch_controller_defaults": {
+      "exclude": true,
+      "why": "switch-controller-* on interfaces — 20 keys, all off unless FortiLink features are in use.",
+      "prefixes": [
+        "switch-controller-"
+      ]
+    },
+    "bfd_stp_lacp": {
+      "exclude": true,
+      "why": "Link-protocol tuning knobs at factory defaults.",
+      "prefixes": [
+        "bfd",
+        "stp",
+        "lacp-",
+        "fail-"
+      ],
+      "keys": [
+        "min-links",
+        "min-links-down",
+        "algorithm",
+        "link-up-delay",
+        "aggregate-type",
+        "system-id",
+        "system-id-type"
+      ]
+    },
+    "health_nesting": {
+      "exclude": false,
+      "flatten": true,
+      "why": "health:{x:{value,severity}} on APs/clients. flatten=true collapses to x_severity, keeping the verdict at ~60% of the bytes.",
+      "keys": [
+        "health"
+      ]
+    }
+  },
+  "tools": {
+    "get_firewall_policies": {
+      "dropValues": {
+        "disableDefaults": true
+      },
+      "allowlist": [
+        "policyid",
+        "name",
+        "srcintf",
+        "dstintf",
+        "srcaddr",
+        "dstaddr",
+        "service",
+        "action",
+        "status",
+        "schedule",
+        "nat",
+        "logtraffic",
+        "utm-status",
+        "comments"
+      ]
+    },
+    "get_firewall_policy": {
+      "dropValues": {
+        "disableDefaults": true
+      },
+      "allowlist": [
+        "policyid",
+        "name",
+        "srcintf",
+        "dstintf",
+        "srcaddr",
+        "dstaddr",
+        "service",
+        "action",
+        "status",
+        "schedule",
+        "nat",
+        "logtraffic",
+        "utm-status",
+        "comments"
+      ]
+    },
+    "get_interfaces_config": {
+      "dropValues": {
+        "disableDefaults": true
+      },
+      "allowlist": [
+        "name",
+        "ip",
+        "type",
+        "vdom",
+        "mode",
+        "role",
+        "status",
+        "allowaccess",
+        "alias",
+        "description",
+        "interface",
+        "vlanid"
+      ]
+    },
+    "get_firewall_sessions": {
+      "groups": {
+        "session_forensics": false
+      },
+      "allowlist": [
+        "saddr",
+        "sport",
+        "daddr",
+        "dport",
+        "proto",
+        "srcintf",
+        "dstintf",
+        "policyid",
+        "duration",
+        "sentbyte",
+        "rcvdbyte",
+        "apps",
+        "country",
+        "srcmac",
+        "dstmac"
+      ]
+    },
+    "get_dhcp_leases": {
+      "allowlist": [
+        "ip",
+        "mac",
+        "hostname",
+        "interface",
+        "reserved",
+        "status",
+        "ssid",
+        "access_point",
+        "expire_time",
+        "vci"
+      ]
+    },
+    "get_routing_table": {
+      "dropKeys": [
+        "ip_version",
+        "vrf",
+        "origin"
+      ],
+      "allowlist": [
+        "ip_mask",
+        "gateway",
+        "interface",
+        "type",
+        "distance",
+        "metric",
+        "priority"
+      ]
+    },
+    "get_static_routes": {
+      "allowlist": [
+        "seq-num",
+        "dst",
+        "gateway",
+        "device",
+        "distance",
+        "priority",
+        "status",
+        "comment"
+      ]
+    },
+    "get_address_objects": {
+      "allowlist": [
+        "name",
+        "type",
+        "subnet",
+        "start-ip",
+        "end-ip",
+        "fqdn",
+        "country",
+        "interface",
+        "associated-interface",
+        "comment"
+      ]
+    },
+    "get_address_groups": {
+      "allowlist": [
+        "name",
+        "member",
+        "comment"
+      ]
+    },
+    "get_service_objects": {
+      "allowlist": [
+        "name",
+        "protocol",
+        "tcp-portrange",
+        "udp-portrange",
+        "sctp-portrange",
+        "icmptype",
+        "category",
+        "comment"
+      ]
+    },
+    "get_vip_objects": {
+      "allowlist": [
+        "name",
+        "type",
+        "extip",
+        "extintf",
+        "mappedip",
+        "portforward",
+        "protocol",
+        "extport",
+        "mappedport",
+        "comment"
+      ]
+    },
+    "get_admin_accounts": {
+      "allowlist": [
+        "name",
+        "accprofile",
+        "trusthost1",
+        "trusthost2",
+        "vdom",
+        "remote-auth",
+        "two-factor",
+        "comments"
+      ]
+    },
+    "get_ipsec_phase1": {
+      "allowlist": [
+        "name",
+        "interface",
+        "ike-version",
+        "remote-gw",
+        "proposal",
+        "dhgrp",
+        "authmethod",
+        "peertype",
+        "net-device",
+        "comments"
+      ]
+    },
+    "get_ipsec_phase2": {
+      "allowlist": [
+        "name",
+        "phase1name",
+        "proposal",
+        "src-subnet",
+        "dst-subnet",
+        "auto-negotiate",
+        "comments"
+      ]
+    },
+    "get_policy_hit_counts": {
+      "allowlist": [
+        "policyid",
+        "active_sessions",
+        "bytes",
+        "packets",
+        "hit_count",
+        "last_used"
+      ]
+    },
+    "get_fortiview_statistics": {
+      "allowlist": [
+        "srcaddr",
+        "dstaddr",
+        "sessions",
+        "srcmac",
+        "srcintf",
+        "dstintf",
+        "dst_port",
+        "protocol",
+        "sentbyte",
+        "rcvdbyte",
+        "tx_bandwidth",
+        "rx_bandwidth",
+        "apps"
+      ]
+    },
+    "get_fortiaps": {
+      "allowlist": [
+        "name",
+        "serial",
+        "status",
+        "state",
+        "clients",
+        "local_ipv4_addr",
+        "connecting_interface",
+        "board_mac",
+        "join_time",
+        "os_version",
+        "ap_profile",
+        "cpu_usage",
+        "mem_free",
+        "mem_total",
+        "health",
+        "last_failure",
+        "last_reboot_time",
+        "wan_status"
+      ]
+    },
+    "get_wifi_clients": {
+      "allowlist": [
+        "mac",
+        "ip",
+        "ssid",
+        "vap_name",
+        "wtp_id",
+        "wtp_ip",
+        "hostname",
+        "manufacturer",
+        "os",
+        "signal",
+        "snr",
+        "channel",
+        "vlan_id",
+        "radio_type",
+        "mimo",
+        "bandwidth_tx",
+        "bandwidth_rx",
+        "security_str",
+        "authentication",
+        "channel",
+        "idle_time",
+        "data_rate_bps",
+        "health",
+        "noise"
+      ]
+    },
+    "get_fortiswitches": {
+      "allowlist": [
+        "switch-id",
+        "serial",
+        "status",
+        "state",
+        "connecting_from",
+        "join_time",
+        "os_version",
+        "fgt_peer_intf_name",
+        "max_poe_budget",
+        "type"
+      ]
+    },
+    "get_logs": {
+      "allowlist": [
+        "date",
+        "time",
+        "action",
+        "policyid",
+        "srcip",
+        "srcport",
+        "srcintf",
+        "srcname",
+        "dstip",
+        "dstport",
+        "dstintf",
+        "dstname",
+        "service",
+        "proto",
+        "app",
+        "duration",
+        "sentbyte",
+        "rcvdbyte",
+        "user",
+        "msg",
+        "logdesc",
+        "reason",
+        "sessionid",
+        "url",
+        "hostname",
+        "catdesc",
+        "attack",
+        "severity",
+        "type",
+        "subtype"
+      ]
+    },
+    "get_switch_port_status": {
+      "allowlist": [
+        "interface",
+        "status",
+        "speed",
+        "duplex",
+        "vlan",
+        "fortilink_port",
+        "fgt_peer_port_name",
+        "fgt_peer_device_name",
+        "poe_status",
+        "poe_capable",
+        "port_power",
+        "switch_id",
+        "switch_serial"
+      ]
+    }
+  },
+  "limits": {
+    "maxResponseBytes": null,
+    "maxArrayItems": 20
+  },
+  "audit": {
+    "annotate": true,
+    "verboseBypassesFilters": false
+  }
+}

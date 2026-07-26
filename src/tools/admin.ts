@@ -6,8 +6,7 @@ import { Type } from "typebox";
 import { deviceParam, textResult } from "./helpers.js";
 import { resolveDevice, getToken, getMaxResponseBytes, listDevices } from "../config.js";
 import { fortiGet, fortiResults } from "../client.js";
-import { bounded, project } from "../bounds.js";
-import { ADMIN_KEEP } from "../types.js";
+import { bounded } from "../bounds.js";
 
 export function registerAdminTools(pi: ExtensionAPI): void {
 	pi.registerTool({
@@ -37,7 +36,6 @@ export function registerAdminTools(pi: ExtensionAPI): void {
 			const { name, device: dev } = resolveDevice(params.device);
 			const token = getToken(dev);
 			let data = fortiResults(await fortiGet("cmdb/system/admin", dev, token, {}, signal));
-			data = project(data, ADMIN_KEEP, !!params.verbose);
 			data = bounded(data, "Set verbose=True for full fields.", getMaxResponseBytes());
 			return textResult(data, { device: name });
 		},

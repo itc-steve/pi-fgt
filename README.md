@@ -28,6 +28,7 @@ FortiGate tools register at load but stay **inactive by default** each new sessi
 | `/fortigate off` | Disable tools and clear the device selection |
 | `/fortigate toggle` | Off → on+picker, on → off |
 | `/fortigate status` | Show on/off + which devices the AI can see |
+| `/fortigate filters` | Show which response fields are excluded, and from which config |
 
 ## Device selection (the picker)
 
@@ -58,19 +59,22 @@ Config knob (tools only — does not affect device visibility):
 Set `"on"` to auto-activate the tools each session; devices still start hidden
 until you run `/fortigate`.
 
-## Config (two files side by side)
+## Config (three files side by side)
 
 | File | Purpose |
 |------|---------|
 | `~/.pi/agent/fortigate.json` | Device names, URL, VDOM, `tokenEnv` **name**, `sessionDefault` (no secrets) |
 | `~/.pi/agent/fortigate.env` | Actual tokens as `KEY=value` |
+| `~/.pi/agent/fortigate-filters.json` | Which response fields reach the AI (optional — defaults apply if absent) |
 
 ```bash
 # after pi install, examples live under the package install path, or copy from a checkout:
 cp /path/to/pi-fgt/fortigate.json.example ~/.pi/agent/fortigate.json
 cp /path/to/pi-fgt/fortigate.env.example  ~/.pi/agent/fortigate.env
 chmod 600 ~/.pi/agent/fortigate.env
-# edit both
+# optional — only if you want to change what gets filtered out:
+cp /path/to/pi-fgt/fortigate-filters.example.json ~/.pi/agent/fortigate-filters.json
+# edit as needed
 ```
 
 ### `fortigate.json`
@@ -117,7 +121,7 @@ Use `list_fortigate_devices` if unsure — do not read `fortigate.json` for secr
 - `attempt_write_operation` refuses, no network I/O
 - VDOM pinned from device config; caller cannot override
 - Path/name validation on escape hatches + ids
-- Response size cap + field projection
+- Response size cap + configurable field filtering
 - Tokens only via env / fortigate.env
 - Device exposure is opt-in per session, in-memory, never persisted
 
@@ -129,14 +133,73 @@ every other running pi session. That file is gone. Selection is now in-memory,
 per session, all-hidden until you pick. Safe to delete any leftover
 `~/.pi/agent/fortigate.state.json`; it is no longer read.
 
-## Token-conscious responses (v1.1)
+## Configurable response filters (v1.3)
 
-Default tool output is projected for network-engineering triage:
+Field filtering used to be hardcoded across `src/types.ts` and `bounds.ts`, so
+users could not see or change what was being removed. It now lives in one
+config file.
 
-- Global strip of `q_origin_key` and empty-string keys
-- Sessions / FortiView / policy hits / DHCP / licenses / rogue APs / traffic logs → ops fields only
-- Pass `verbose=true` when you need full FortiOS rows
-- Prefer filters (`source_ip`, `name=`, `up_only=true`, `live_only=true`) before dumping catalogs
+```bash
+cp fortigate-filters.example.json ~/.pi/agent/fortigate-filters.json
+```
+
+Run `/fortigate filters` to see what is currently excluded and from where.
+Responses that lost fields carry a `_filtered` stamp naming the groups, so the
+model can tell you what it did not receive.
+
+**Measured on a live FGT70F (v7.4.12), defaults, 8 common tools: 434KB → 45KB (90%).**
+
+| tool | raw | filtered | cut |
+|------|-----|----------|-----|
+| `get_interfaces_config` | 178.9 KB | 3.9 KB | 98% |
+| `get_firewall_policies` | 41.0 KB | 2.7 KB | 93% |
+| `get_address_objects` | 168.5 KB | 17.7 KB | 89% |
+| `get_fortiaps` | 9.0 KB | 1.6 KB | 82% |
+| `get_firewall_sessions` | 14.5 KB | 6.5 KB | 55% |
+
+### How it works
+
+Precedence, first match wins:
+
+1. `tools.<name>.keep[]` — always survives
+2. `tools.<name>.allowlist[]` — ONLY these fields are returned (strongest)
+3. `dropKeys` / `dropPrefixes` / `dropSuffixes` — explicit + group rules
+4. `dropValues` — `byValue` placeholders, `disableDefaults`
+5. `dropEmpty` — empty string / array / object / null
+
+A field in an `allowlist` is immune to rule 4, so a meaningful default like
+`logtraffic: "disable"` is never silently dropped.
+
+### Getting data back
+
+Every noise family is a named group with a `why`. Flip one boolean:
+
+```jsonc
+{ "groups": { "uuid": { "exclude": false } } }   // UUIDs return everywhere
+```
+
+Re-enabling a group also re-admits its fields past a tool allowlist, so this
+works even for tools with a strict allowlist. To lift an allowlist entirely:
+
+```jsonc
+{ "tools": { "get_firewall_policies": { "allowlist": null } } }
+```
+
+Your file is deep-merged over the defaults — only specify what you change.
+Invalid JSON falls back to defaults with a warning rather than breaking tools.
+
+### Defaults worth knowing
+
+- **Excluded:** `uuid`, ZTNA, IPv6 blocks, DiffServ/ToS, PPTP/L2TP, `*-negate`,
+  duplicate identity fields (`wtp_name` = `wtp_id`), FortiOS internal indexes,
+  `switch-controller-*`, WiFi MCS/rate-score telemetry
+- **Kept on purpose:** `country`/`srcmac` on sessions (geo + MAC correlation),
+  `noise` on WiFi clients (RF floor) — both were dropped before v1.3
+- **`verbose=true` still filters** by default; set
+  `audit.verboseBypassesFilters: true` for a true raw escape hatch
+
+Still prefer query filters (`source_ip`, `name=`, `up_only=true`) before
+dumping catalogs.
 
 ## Tools
 

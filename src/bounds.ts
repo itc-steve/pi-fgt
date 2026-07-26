@@ -3,40 +3,16 @@
 import { DEFAULT_MAX_RESPONSE_BYTES, PER_PAGE_CAP } from "./types.js";
 import { deepTrim } from "./summarize.js";
 import { clampPerPage as clampPerPageValidate } from "./validate.js";
+import { filterForCurrentTool } from "./filters/index.js";
 
 /** @deprecated Prefer import from validate.js — kept for any external callers. */
 export function clampPerPage(n: number, cap = PER_PAGE_CAP): number {
 	return clampPerPageValidate(n, cap);
 }
 
-/**
- * Global noise strip for FortiOS JSON:
- * - drop q_origin_key (always duplicates name)
- * - drop empty-string keys (alias:"", comments:"", …)
- * Applied on every tool response via textResult.
- */
-export function stripNoise(value: unknown, depth = 0): unknown {
-	if (depth > 12) return value;
-	if (Array.isArray(value)) return value.map((v) => stripNoise(v, depth + 1));
-	if (!value || typeof value !== "object") return value;
-	const out: Record<string, unknown> = {};
-	for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
-		if (k === "q_origin_key") continue;
-		if (v === "") continue;
-		out[k] = stripNoise(v, depth + 1);
-	}
-	return out;
-}
-
-/** Project one object to keep-set (non-array). */
-export function projectOne(item: any, keep: Set<string>): Record<string, any> {
-	const out: Record<string, any> = {};
-	if (!item || typeof item !== "object") return out;
-	for (const k of keep) {
-		if (k in item) out[k] = item[k];
-	}
-	return out;
-}
+// stripNoise() removed in v1.3.0 — q_origin_key + empty-string dropping now
+// lives in filters/ (global.dropKeys, global.dropEmpty), where users can see
+// and change it. See fortigate-filters.example.json.
 
 /** apps[] → ["udp/53", …] (drop id/protocol/protocol_str/port siblings). */
 export function compactApps(apps: unknown): string[] | undefined {
@@ -51,13 +27,6 @@ export function compactApps(apps: unknown): string[] | undefined {
 		})
 		.filter(Boolean);
 	return names.length ? names : undefined;
-}
-
-export function project(items: any, keep: Set<string>, verbose?: boolean): any {
-	if (verbose || !Array.isArray(items)) return items;
-	return items
-		.filter((item: any) => item && typeof item === "object")
-		.map((item: any) => projectOne(item, keep));
 }
 
 function jsonSize(payload: unknown): number {
@@ -78,6 +47,10 @@ export function bounded(
 	hint = "Narrow the query: filter by name/id, lower count, or request a single object.",
 	maxBytes = DEFAULT_MAX_RESPONSE_BYTES,
 ): any {
+	// Filter first so truncation is measured on post-filter bytes — otherwise
+	// real rows get dropped to make room for noise fields. Idempotent, so tools
+	// that also hit textResult() are unaffected.
+	payload = filterForCurrentTool(payload);
 	if (jsonSize(payload) <= maxBytes) return payload;
 
 	// 1) list → keep leading items that fit (budget for envelope keys/hint)

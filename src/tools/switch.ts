@@ -6,8 +6,8 @@ import { Type } from "typebox";
 import { deviceParam, textResult } from "./helpers.js";
 import { resolveDevice, getToken, getMaxResponseBytes } from "../config.js";
 import { fortiGet, fortiResults } from "../client.js";
-import { bounded, project } from "../bounds.js";
-import { FORTISWITCH_KEEP, SWITCH_PORT_KEEP } from "../types.js";
+import { bounded } from "../bounds.js";
+
 
 function matchSwitch(row: any, needle: string): boolean {
 	const n = needle.toLowerCase();
@@ -39,16 +39,17 @@ export function registerSwitchTools(pi: ExtensionAPI): void {
 					signal,
 				),
 			);
+			// Replace the heavy ports[] array with counts; field selection itself
+			// is config-driven (filters tools.get_fortiswitches.allowlist).
 			if (!params.verbose && Array.isArray(data)) {
 				data = data.map((sw: any) => {
-					const out: Record<string, unknown> = {};
-					for (const k of FORTISWITCH_KEEP) {
-						if (k in sw) out[k] = sw[k];
-					}
-					const ports = Array.isArray(sw.ports) ? sw.ports : [];
-					out.port_count = ports.length;
-					out.ports_up = ports.filter((p: any) => p?.status === "up").length;
-					return out;
+					const { ports: rawPorts, ...rest } = sw ?? {};
+					const ports = Array.isArray(rawPorts) ? rawPorts : [];
+					return {
+						...rest,
+						port_count: ports.length,
+						ports_up: ports.filter((p: any) => p?.status === "up").length,
+					};
 				});
 			}
 			data = bounded(
@@ -99,15 +100,7 @@ export function registerSwitchTools(pi: ExtensionAPI): void {
 					const ports = Array.isArray(sw.ports) ? sw.ports : [];
 					for (const p of ports) {
 						if (upOnly && p?.status !== "up") continue;
-						const row = params.verbose
-							? { ...p }
-							: (() => {
-									const o: Record<string, unknown> = {};
-									for (const k of SWITCH_PORT_KEEP) {
-										if (k in p) o[k] = p[k];
-									}
-									return o;
-								})();
+						const row: Record<string, unknown> = { ...p };
 						row.switch_id = sw["switch-id"] || sw.serial;
 						row.switch_serial = sw.serial;
 						out.push(row);

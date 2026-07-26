@@ -4,8 +4,9 @@ import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { resolveDevice, getToken, getMaxResponseBytes } from "../config.js";
 import { fortiGet, fortiResults } from "../client.js";
-import { bounded, hardCapText, project, stripNoise } from "../bounds.js";
+import { bounded, hardCapText } from "../bounds.js";
 import { summarizeResourceUsage } from "../summarize.js";
+import { filterAudit, filterForCurrentTool, filterMaxResponseBytes } from "../filters/index.js";
 
 export const deviceParam = {
 	device: Type.Optional(
@@ -29,18 +30,31 @@ function alreadyBounded(data: unknown): boolean {
 
 /** Compact JSON (no pretty-print). Never mid-slice JSON (invalid parse = P0 agent break). */
 export function textResult(data: unknown, details: Record<string, unknown> = {}) {
-	const max = getMaxResponseBytes();
+	const max = filterMaxResponseBytes() ?? getMaxResponseBytes();
 	const defaultHint = "Response too large; narrow query or raise maxResponseBytes.";
 
 	if (typeof data === "string") {
 		return { content: [{ type: "text", text: hardCapText(data, max) }], details };
 	}
 
-	// Global: drop q_origin_key + empty-string keys before bound/serialize
-	data = stripNoise(data);
+	// Config-driven field filtering (~/.pi/agent/fortigate-filters.json).
+	// Idempotent — bounded() usually filtered already; this catches paths that
+	// reach textResult() directly.
+	data = filterForCurrentTool(data);
 
 	// Bound once — callers may already have called bounded() with a better hint
 	let payload: unknown = alreadyBounded(data) ? data : bounded(data, defaultHint, max);
+
+	// Stamp what the filters removed, so the model can offer it back.
+	// After bounding: the audit must survive truncation, not be truncated away.
+	const audit = filterAudit();
+	if (audit) {
+		payload =
+			payload && typeof payload === "object" && !Array.isArray(payload)
+				? { ...(payload as object), _filtered: audit }
+				: { _filtered: audit, data: payload };
+	}
+
 	let text = JSON.stringify(payload);
 
 	// Envelope overhead can still push past max; re-bound inner data, never chop JSON
@@ -80,7 +94,6 @@ export async function runForti(
 	opts: {
 		query?: Record<string, unknown>;
 		useResults?: boolean;
-		projectKeep?: Set<string>;
 		verbose?: boolean;
 		boundHint?: string;
 		/** Collapse FortiOS resource time-series to latest sample */
@@ -101,16 +114,12 @@ export async function runForti(
 			data = fortiResults(data);
 		}
 
-		if (opts.projectKeep) {
-			data = project(
-				data,
-				opts.projectKeep,
-				!!opts.verbose || !!params?.verbose,
-			);
-		}
+		// Filter BEFORE bounding so truncation counts post-filter bytes
+		// (otherwise rows get dropped to make room for noise).
+		data = filterForCurrentTool(data);
 
 		// Always bound — never dump unbounded FortiOS JSON into model context
-		const max = getMaxResponseBytes();
+		const max = filterMaxResponseBytes() ?? getMaxResponseBytes();
 		data = bounded(
 			data,
 			opts.boundHint ||

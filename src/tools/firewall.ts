@@ -6,31 +6,11 @@ import { Type } from "typebox";
 import { deviceParam, textResult } from "./helpers.js";
 import { resolveDevice, getToken, getMaxResponseBytes } from "../config.js";
 import { fortiGet, fortiResults } from "../client.js";
-import { bounded, project } from "../bounds.js";
+import { bounded } from "../bounds.js";
 import { validateName } from "../validate.js";
-import {
-	POLICY_KEEP,
-	ADDRESS_KEEP,
-	ADDRGRP_KEEP,
-	SERVICE_KEEP,
-	VIP_KEEP,
-	ROUTE_KEEP,
-} from "../types.js";
 
-const IFACE_KEEP = new Set([
-	"name",
-	"ip",
-	"type",
-	"vdom",
-	"mode",
-	"role",
-	"status",
-	"allowaccess",
-	"alias",
-	"description",
-	"interface",
-	"vlanid",
-]);
+// Field selection lives in src/filters/defaults.ts (tools.<name>.allowlist),
+// so users can see and change it via ~/.pi/agent/fortigate-filters.json.
 
 const verboseParam = Type.Optional(
 	Type.Boolean({ description: "Return full records (default: projected fields only)" }),
@@ -44,7 +24,6 @@ async function cmdbList(
 	path: string,
 	params: { device?: string; verbose?: boolean; name?: string },
 	signal: AbortSignal,
-	keep: Set<string> | null,
 	hint: string,
 ) {
 	const { name, device: dev } = resolveDevice(params.device);
@@ -54,7 +33,6 @@ async function cmdbList(
 	if (nameQ && Array.isArray(data)) {
 		data = data.filter((row: any) => String(row?.name || "").toLowerCase().includes(nameQ));
 	}
-	if (keep) data = project(data, keep, !!params.verbose);
 	data = bounded(data, hint, getMaxResponseBytes());
 	return textResult(data, { device: name, path });
 }
@@ -72,7 +50,6 @@ export function registerFirewallTools(pi: ExtensionAPI): void {
 				"cmdb/firewall/policy",
 				params,
 				signal,
-				POLICY_KEEP,
 				"Filter with name=, set verbose=true for full fields, or get_firewall_policy(policy_id).",
 			);
 		},
@@ -97,13 +74,6 @@ export function registerFirewallTools(pi: ExtensionAPI): void {
 			);
 			// FortiOS often returns a 1-element array for /policy/<id>
 			if (Array.isArray(data)) data = data[0] ?? {};
-			if (!params.verbose && data && typeof data === "object") {
-				const out: Record<string, unknown> = {};
-				for (const k of POLICY_KEEP) {
-					if (k in data) out[k] = data[k];
-				}
-				data = out;
-			}
 			data = bounded(
 				data,
 				"Use verbose=true only if you need every field.",
@@ -125,7 +95,6 @@ export function registerFirewallTools(pi: ExtensionAPI): void {
 				"cmdb/firewall/address",
 				params,
 				signal,
-				ADDRESS_KEEP,
 				"Filter with name=; set verbose=true for full fields.",
 			);
 		},
@@ -142,7 +111,6 @@ export function registerFirewallTools(pi: ExtensionAPI): void {
 				"cmdb/firewall/addrgrp",
 				params,
 				signal,
-				ADDRGRP_KEEP,
 				"Filter with name=; set verbose=true for full fields.",
 			);
 		},
@@ -159,7 +127,6 @@ export function registerFirewallTools(pi: ExtensionAPI): void {
 				"cmdb/firewall.service/custom",
 				params,
 				signal,
-				SERVICE_KEEP,
 				"Filter with name=; set verbose=true for full fields.",
 			);
 		},
@@ -176,7 +143,6 @@ export function registerFirewallTools(pi: ExtensionAPI): void {
 				"cmdb/firewall.service/group",
 				params,
 				signal,
-				null,
 				"Large service catalogs: query individual members if truncated.",
 			);
 		},
@@ -193,7 +159,6 @@ export function registerFirewallTools(pi: ExtensionAPI): void {
 				"cmdb/firewall/vip",
 				params,
 				signal,
-				VIP_KEEP,
 				"Set verbose=True for full fields.",
 			);
 		},
@@ -210,7 +175,6 @@ export function registerFirewallTools(pi: ExtensionAPI): void {
 				"cmdb/firewall/ippool",
 				params,
 				signal,
-				null,
 				"If truncated, query a single pool with get_config_object('firewall/ippool/<name>').",
 			);
 		},
@@ -227,7 +191,6 @@ export function registerFirewallTools(pi: ExtensionAPI): void {
 				"cmdb/router/static",
 				params,
 				signal,
-				ROUTE_KEEP,
 				"Set verbose=True for full fields, or use get_routing_table for the active RIB.",
 			);
 		},
@@ -246,7 +209,6 @@ export function registerFirewallTools(pi: ExtensionAPI): void {
 				"cmdb/system/interface",
 				params,
 				signal,
-				IFACE_KEEP,
 				"Filter with name=; set verbose=true for full fields.",
 			);
 		},
@@ -259,7 +221,7 @@ export function registerFirewallTools(pi: ExtensionAPI): void {
 		promptSnippet: "FortiGate zones",
 		parameters: Type.Object({ ...deviceParam }),
 		async execute(_id, params, signal) {
-			return cmdbList("cmdb/system/zone", params, signal, null, "Zone list truncated; narrow query.");
+			return cmdbList("cmdb/system/zone", params, signal, "Zone list truncated; narrow query.");
 		},
 	});
 }

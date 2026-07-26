@@ -10,6 +10,8 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { loadConfig, listDevices, resetSessionVisibility } from "./config.js";
 import { showDevicePicker } from "./device-picker.js";
+import { loadFilters, filtersPath, filtersLoadError } from "./filters/index.js";
+import { withFilterContext } from "./filters/wrap.js";
 import { FORTIGATE_TOOL_NAMES, FORTIGATE_TOOL_NAME_SET } from "./tool-names.js";
 import { registerSystemTools } from "./tools/system.js";
 import { registerNetworkTools } from "./tools/network.js";
@@ -80,6 +82,10 @@ function parseArgs(args: unknown): string {
 }
 
 export default function (pi: ExtensionAPI): void {
+	// Every tool registers through a proxy that tags responses with the tool
+	// name, so ~/.pi/agent/fortigate-filters.json can apply per-tool rules.
+	pi = withFilterContext(pi);
+
 	registerSystemTools(pi);
 	registerNetworkTools(pi);
 	registerFirewallTools(pi);
@@ -104,6 +110,7 @@ export default function (pi: ExtensionAPI): void {
 	pi.on("session_start", (_event, ctx) => {
 		try {
 			resetSessionVisibility();
+			loadFilters(true);
 			const cfg = loadConfig(true);
 			const wantOn = cfg.sessionDefault === "on";
 			setFortiGateEnabled(pi, wantOn);
@@ -167,6 +174,29 @@ export default function (pi: ExtensionAPI): void {
 			return;
 		}
 
+		if (cmd === "filters" || cmd === "f") {
+			const fc = loadFilters(true);
+			const err = filtersLoadError();
+			const on: string[] = [];
+			const off: string[] = [];
+			for (const [n, g] of Object.entries(fc.groups || {})) {
+				(g.exclude ? on : off).push(n);
+			}
+			const tools = Object.keys(fc.tools || {});
+			ctx.ui.notify(
+				[
+					err ? `⚠ ${err}` : `Config: ${filtersPath()}`,
+					`Filtering: ${fc.enabled ? "ON" : "OFF"}  |  verbose bypass: ${fc.audit?.verboseBypassesFilters ? "yes" : "no"}`,
+					`Excluded groups (${on.length}): ${on.join(", ") || "none"}`,
+					`Kept groups (${off.length}): ${off.join(", ") || "none"}`,
+					`Per-tool rules: ${tools.join(", ") || "none"}`,
+					`Edit that file to change what the AI sees; responses carry _filtered when fields were removed.`,
+				].join("\n"),
+				err ? "warn" : "info",
+			);
+			return;
+		}
+
 		if (cmd === "off" || cmd === "disable" || cmd === "0") {
 			setFortiGateEnabled(pi, false);
 			resetSessionVisibility();
@@ -188,7 +218,7 @@ export default function (pi: ExtensionAPI): void {
 		}
 
 		ctx.ui.notify(
-			"Usage: /fortigate [on|off|toggle|status]  — /fortigate opens the device picker. Devices are hidden from the AI until you select them, every session, never saved.",
+			"Usage: /fortigate [on|off|toggle|status|filters]  — /fortigate opens the device picker. Devices are hidden from the AI until you select them, every session, never saved.",
 			"warn",
 		);
 	};
@@ -199,6 +229,7 @@ export default function (pi: ExtensionAPI): void {
 		{ value: "toggle", description: "Flip FortiGate tools on (with picker) / off" },
 		{ value: "status", description: "Show on/off + which devices the AI can see" },
 		{ value: "devices", description: "Open the device picker (same as /fortigate)" },
+		{ value: "filters", description: "Show which response fields are being excluded, and from where" },
 	];
 
 	const getArgumentCompletions = (prefix: string) => {

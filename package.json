@@ -1,6 +1,6 @@
 {
   "name": "@itc-steve/pi-fgt",
-  "version": "1.2.0",
+  "version": "1.3.0",
   "description": "Pi extension: read-only multi-device FortiGate (FortiOS REST) tools — firewall, VPN, FortiAP, FortiSwitch",
   "keywords": [
     "pi-package",
@@ -32,9 +32,15 @@
     "types",
     "fortigate.json.example",
     "fortigate.env.example",
+    "fortigate-filters.example.json",
     "README.md",
     "LICENSE"
   ],
+  "scripts": {
+    "filters:example": "node --experimental-strip-types scripts/gen-filters-example.ts",
+    "test:filters": "node --experimental-strip-types src/filters/engine.test.ts",
+    "typecheck": "tsc --noEmit"
+  },
   "pi": {
     "extensions": [
       "./src/index.ts"

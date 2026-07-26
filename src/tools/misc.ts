@@ -6,9 +6,8 @@ import { Type } from "typebox";
 import { deviceParam, textResult } from "./helpers.js";
 import { resolveDevice, getToken, getMaxResponseBytes } from "../config.js";
 import { fortiGet, fortiResults } from "../client.js";
-import { bounded, compactApps, projectOne } from "../bounds.js";
+import { bounded, compactApps } from "../bounds.js";
 import { clampPerPage } from "../validate.js";
-import { FORTIVIEW_KEEP } from "../types.js";
 
 export const MISC_TOOL_NAMES = [
   "get_license_fortianalyzer_status",
@@ -432,12 +431,14 @@ export function registerMiscTools(pi: ExtensionAPI): void {
         let data: any = fortiResults(await fortiGet("monitor/fortiview/realtime-statistics", dev, token, q, signal));
         // Project details[] when present
         const rows = Array.isArray(data) ? data : Array.isArray(data?.details) ? data.details : null;
+        // Field selection is config-driven (filters tools.get_fortiview_statistics);
+        // only apps[] compaction happens here.
         if (rows && !params.verbose) {
           const projected = rows.map((row: any) => {
-            const out = projectOne(row, FORTIVIEW_KEEP);
+            const out = { ...row };
             const apps = compactApps(row.apps);
             if (apps) out.apps = apps;
-            // apps with counts if available
+            // prefer name×count form when the API supplies counts
             if (Array.isArray(row.apps) && row.apps.some((a: any) => a?.count != null)) {
               out.apps = row.apps
                 .map((a: any) => (a?.name ? `${a.name}${a.count != null ? `×${a.count}` : ""}` : null))

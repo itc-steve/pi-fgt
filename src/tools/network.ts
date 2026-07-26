@@ -6,9 +6,14 @@ import { Type } from "typebox";
 import { deviceParam, textResult } from "./helpers.js";
 import { resolveDevice, getToken, getMaxResponseBytes } from "../config.js";
 import { fortiGet, fortiResults } from "../client.js";
-import { bounded, compactApps, project, projectOne } from "../bounds.js";
+import { bounded, compactApps } from "../bounds.js";
 import { clampPerPage } from "../validate.js";
-import { SESSION_KEEP, DHCP_KEEP, POLICY_HIT_KEEP } from "../types.js";
+
+/** apps[] → ["udp/53"]. Field selection itself lives in filters/defaults.ts. */
+function withCompactApps(row: any): any {
+  const apps = compactApps(row?.apps);
+  return apps ? { ...row, apps } : row;
+}
 
 export function registerNetworkTools(pi: ExtensionAPI): void {
   pi.registerTool({
@@ -102,7 +107,6 @@ export function registerNetworkTools(pi: ExtensionAPI): void {
             return true;
           });
         }
-        data = project(data, DHCP_KEEP, !!params.verbose);
       }
       return textResult(
         bounded(data, "Filter with ip=, mac=, or interface=.", getMaxResponseBytes()),
@@ -154,14 +158,9 @@ export function registerNetworkTools(pi: ExtensionAPI): void {
           });
           const matchedInWindow = details.length;
           details = details.slice(0, c);
-          if (!verbose) {
-            details = details.map((row: any) => {
-              const out = projectOne(row, SESSION_KEEP);
-              const apps = compactApps(row.apps);
-              if (apps) out.apps = apps;
-              return out;
-            });
-          }
+          // Field selection is config-driven (filters tools.get_firewall_sessions);
+          // only the apps[] compaction has to happen here.
+          if (!verbose) details = details.map(withCompactApps);
           data = {
             summary: {
               matched_count: matchedInWindow,
@@ -178,12 +177,7 @@ export function registerNetworkTools(pi: ExtensionAPI): void {
           };
         } else {
           if (!verbose) {
-            details = details.map((row: any) => {
-              const out = projectOne(row, SESSION_KEEP);
-              const apps = compactApps(row.apps);
-              if (apps) out.apps = apps;
-              return out;
-            });
+            details = details.map(withCompactApps);
             data = { ...data, details };
           }
           if (typeof apiMatched === "number" && details.length < apiMatched) {
@@ -220,7 +214,6 @@ export function registerNetworkTools(pi: ExtensionAPI): void {
       const { name, device: dev } = resolveDevice(params.device);
       const token = getToken(dev);
       let data = fortiResults(await fortiGet("monitor/firewall/policy", dev, token, {}, signal));
-      if (!params.verbose) data = project(data, POLICY_HIT_KEEP, false);
       return textResult(bounded(data, "Correlate with get_firewall_policy; verbose=true for week history.", getMaxResponseBytes()), { device: name });
     },
   });
