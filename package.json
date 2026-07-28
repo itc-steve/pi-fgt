@@ -38,7 +38,8 @@
   ],
   "scripts": {
     "filters:example": "node --experimental-strip-types scripts/gen-filters-example.ts",
-    "test:filters": "node --experimental-strip-types src/filters/engine.test.ts",
+    "test": "npm run test:filters",
+    "test:filters": "out=$(mktemp -d) && tsc --noEmit false --outDir \"$out\" && node \"$out/filters/engine.test.js\"; code=$?; rm -rf \"$out\"; exit $code",
     "typecheck": "tsc --noEmit"
   },
   "pi": {
