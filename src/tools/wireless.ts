@@ -14,7 +14,8 @@ export function registerWirelessTools(pi: ExtensionAPI): void {
 		label: "FortiGate: FortiAPs",
 		description:
 			"Managed FortiAPs (monitor/wifi/managed_ap). " +
-			"Returns serial, IP (local_ipv4_addr), client count, status, MAC. Prefer this over escape hatches.",
+			"Returns serial, IP (local_addr on FortiOS 7.6+, local_ipv4_addr on 7.4), " +
+			"client count, status, MAC. Prefer this over escape hatches.",
 		promptSnippet: "FortiGate FortiAP list (serial/IP/clients)",
 		parameters: Type.Object({
 			...deviceParam,

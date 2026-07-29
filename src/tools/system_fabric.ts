@@ -236,16 +236,31 @@ export function registerSystemFabricTools(pi: ExtensionAPI): void {
   pi.registerTool({
     name: "get_fortimanager_status",
     label: "FortiGate: FortiManager Status",
-    description: "FortiManager status (monitor/system/fortimanager/status). Read-only.",
+    description: "FortiManager status. On FortiOS 7.6+ the legacy endpoint (monitor/system/fortimanager/status) was removed; falls back to monitor/system/central-management/status with a note. Read-only.",
     promptSnippet: "FortiGate FortiManager status",
     parameters: Type.Object({ ...deviceParam }),
     async execute(_id, params, signal) {
       try {
         const { name, device: dev } = resolveDevice(params.device);
         const token = getToken(dev);
-        let data = fortiResults(await fortiGet("monitor/system/fortimanager/status", dev, token, {}, signal));
+        // Try legacy path first (pre-7.6 devices)
+        let data: any;
+        let path = "monitor/system/fortimanager/status";
+        try {
+          data = fortiResults(await fortiGet(path, dev, token, {}, signal));
+        } catch (e: any) {
+          if (e?.name === "AbortError") throw e;
+          // ponytail: 404 on 7.6+ is expected — fall back to replacement endpoint
+          if (e?.message?.startsWith("404")) {
+            path = "monitor/system/central-management/status";
+            data = fortiResults(await fortiGet(path, dev, token, {}, signal));
+            data = { ...data, _note: "FortiOS 7.6+ removed monitor/system/fortimanager/status. This tool uses the replacement endpoint monitor/system/central-management/status. Data format may differ from pre-7.6." };
+          } else {
+            throw e;
+          }
+        }
         data = bounded(data, "Narrow the query if truncated.", getMaxResponseBytes());
-        return textResult(data, { device: name, path: "monitor/system/fortimanager/status" });
+        return textResult(data, { device: name, path });
       } catch (e: any) {
         if (e?.name === "AbortError") throw e;
         return textResult(`Error: ${e?.message || String(e)}`);

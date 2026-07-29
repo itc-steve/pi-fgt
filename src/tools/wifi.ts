@@ -96,24 +96,16 @@ export function registerWifiTools(pi: ExtensionAPI): void {
           const cap = clampPerPage(params.count ?? 15);
           const truncated = data.length > cap;
           if (truncated) data = data.slice(0, cap);
-          if (!params.verbose) {
-            data = data.map((r: any) => {
-              const det = Array.isArray(r?.detected_by_wtp) ? r.detected_by_wtp : [];
-              return {
-                ssid: r.ssid,
-                mac: r.mac,
-                manufacturer: r.manufacturer,
-                security_mode: r.security_mode,
-                signal_strength: r.signal_strength,
-                channel: r.channel,
-                is_fake: r.is_fake,
-                is_dead: r.is_dead,
-                wtp_count: r.wtp_count ?? det.length,
-                wtp_ip: det[0]?.wtp_ip || r.wtp_ip,
-                last_seen: r.last_seen,
-              };
-            });
-          }
+          // Field selection is config-driven (filters tools.get_wifi_rogue_aps);
+          // only the two derived-from-detected_by_wtp values happen here.
+          data = data.map((r: any) => {
+            const det = Array.isArray(r?.detected_by_wtp) ? r.detected_by_wtp : [];
+            return {
+              ...r,
+              wtp_count: r.wtp_count ?? det.length,
+              wtp_ip: det[0]?.wtp_ip || r.wtp_ip,
+            };
+          });
           if (truncated) {
             data = {
               _truncated: true,

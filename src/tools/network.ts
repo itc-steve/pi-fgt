@@ -8,6 +8,7 @@ import { resolveDevice, getToken, getMaxResponseBytes } from "../config.js";
 import { fortiGet, fortiResults } from "../client.js";
 import { bounded, compactApps } from "../bounds.js";
 import { clampPerPage } from "../validate.js";
+import { PER_PAGE_CAP } from "../types.js";
 
 /** apps[] → ["udp/53"]. Field selection itself lives in filters/defaults.ts. */
 function withCompactApps(row: any): any {
@@ -119,7 +120,7 @@ export function registerNetworkTools(pi: ExtensionAPI): void {
     name: "get_firewall_sessions",
     label: "FortiGate: Firewall Sessions",
     description:
-      "Active sessions (monitor/firewall/session) — who is talking to whom right now. " +
+      "Active sessions (monitor/firewall/sessions) — who is talking to whom right now. " +
       "Default projects to saddr/daddr/ports/proto/intf/policyid/bytes/duration + compact apps. " +
       "ALWAYS pass source_ip or dest_ip for host forensics (client-side on fetched window). " +
       "verbose=true for full FortiOS fields. details is partial — see _hint.",
@@ -135,14 +136,17 @@ export function registerNetworkTools(pi: ExtensionAPI): void {
       const c = clampPerPage(params.count || 25);
       const src = String(params.source_ip || "").trim().toLowerCase();
       const dst = String(params.dest_ip || "").trim().toLowerCase();
-      const verbose = !!params.verbose;
-      // When filtering, fetch max page so client-side filter has a larger window
-      const fetchCount = src || dst ? clampPerPage(50) : c;
+      // FortiOS 7.6+ requires count on monitor/firewall/sessions (424 without it).
+      // API count range: 20..1000; values below 20 are rounded up by FortiOS.
+      // c is the user-facing row limit; fetchCount is the API fetch window, which
+      // is NOT clampPerPage-capped (that cap is 50, the per-tool row limit).
+      const SESSION_FETCH_MAX = 1000;
+      const fetchCount = src || dst ? SESSION_FETCH_MAX : Math.max(20, c);
       const q: Record<string, string | number> = { count: fetchCount, summary: "true" };
       // ponytail: FortiOS 7.4 ignores srcaddr4/dstaddr4 on this endpoint — filter client-side
       const { name, device: dev } = resolveDevice(params.device);
       const token = getToken(dev);
-      let data: any = fortiResults(await fortiGet("monitor/firewall/session", dev, token, q, signal));
+      let data: any = fortiResults(await fortiGet("monitor/firewall/sessions", dev, token, q, signal));
 
       if (data && typeof data === "object" && Array.isArray(data.details)) {
         let details: any[] = data.details;
@@ -159,8 +163,8 @@ export function registerNetworkTools(pi: ExtensionAPI): void {
           const matchedInWindow = details.length;
           details = details.slice(0, c);
           // Field selection is config-driven (filters tools.get_firewall_sessions);
-          // only the apps[] compaction has to happen here.
-          if (!verbose) details = details.map(withCompactApps);
+          // only the apps[] compaction has to happen here (self-gating).
+          details = details.map(withCompactApps);
           data = {
             summary: {
               matched_count: matchedInWindow,
@@ -176,17 +180,15 @@ export function registerNetworkTools(pi: ExtensionAPI): void {
                 : `Filtered client-side within first ${fetched} of ${sessionCount ?? "?"} sessions; returned ${details.length}.`,
           };
         } else {
-          if (!verbose) {
-            details = details.map(withCompactApps);
-            data = { ...data, details };
-          }
+          details = details.slice(0, c).map(withCompactApps);
+          data = { ...data, details };
           if (typeof apiMatched === "number" && details.length < apiMatched) {
             data = {
               ...data,
               _partial: true,
               _returned: details.length,
               _total_matched: apiMatched,
-              _hint: `details is first ${details.length} of ${apiMatched} matched sessions; raise count (max 50) or filter source_ip/dest_ip.`,
+              _hint: `details is first ${details.length} of ${apiMatched} matched sessions; raise count (max ${PER_PAGE_CAP}) or filter source_ip/dest_ip.`,
             };
           }
         }

@@ -3,7 +3,11 @@
 import { DEFAULT_MAX_RESPONSE_BYTES, PER_PAGE_CAP } from "./types.js";
 import { deepTrim } from "./summarize.js";
 import { clampPerPage as clampPerPageValidate } from "./validate.js";
-import { filterForCurrentTool } from "./filters/index.js";
+import {
+	filterForCurrentTool,
+	filterMaxArrayItems,
+	groupEnabled,
+} from "./filters/index.js";
 
 /** @deprecated Prefer import from validate.js — kept for any external callers. */
 export function clampPerPage(n: number, cap = PER_PAGE_CAP): number {
@@ -14,8 +18,12 @@ export function clampPerPage(n: number, cap = PER_PAGE_CAP): number {
 // lives in filters/ (global.dropKeys, global.dropEmpty), where users can see
 // and change it. See fortigate-filters.example.json.
 
-/** apps[] → ["udp/53", …] (drop id/protocol/protocol_str/port siblings). */
+/**
+ * apps[] → ["udp/53", …] (drop id/protocol/protocol_str/port siblings).
+ * Config-gated by group `apps_compact`; undefined = leave the raw array alone.
+ */
 export function compactApps(apps: unknown): string[] | undefined {
+	if (!groupEnabled("apps_compact")) return undefined;
 	if (!Array.isArray(apps) || apps.length === 0) return undefined;
 	const names = apps
 		.map((a: any) => {
@@ -76,7 +84,7 @@ export function bounded(
 	}
 
 	// 2) object → deep-trim arrays then re-check
-	const trimmed = deepTrim(payload, 15);
+	const trimmed = deepTrim(payload, filterMaxArrayItems());
 	if (jsonSize(trimmed) <= maxBytes) {
 		return {
 			_truncated: true,

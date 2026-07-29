@@ -36,7 +36,6 @@ export interface Compiled {
 	dropEmptyObject: boolean;
 	dropNull: boolean;
 	annotate: boolean;
-	maxArrayItems: number;
 }
 
 function mergeRuleBlock(base: RuleBlock, over: RuleBlock | undefined): RuleBlock {
@@ -110,7 +109,6 @@ export function compile(cfg: FilterConfig, toolName?: string): Compiled {
 		dropEmptyObject: rules.dropEmpty?.emptyObject !== false,
 		dropNull: rules.dropEmpty?.nullValue !== false,
 		annotate: cfg.audit?.annotate !== false,
-		maxArrayItems: cfg.limits?.maxArrayItems ?? 20,
 	};
 }
 
@@ -136,13 +134,21 @@ function flattenHealth(v: unknown): unknown {
 
 	const out: Record<string, unknown> = {};
 	for (const [k, sub] of Object.entries(v as Record<string, unknown>)) {
+		// filterForCurrentTool runs twice per call (bounded() then textResult()),
+		// so renaming must be idempotent or the suffix stacks up:
+		// uplink_status_severity_severity_severity. Never re-suffix a key that
+		// already carries it.
+		const sev = k.endsWith("_severity") ? k : `${k}_severity`;
 		if (sub && typeof sub === "object" && !Array.isArray(sub) && "severity" in (sub as any)) {
-			out[`${k}_severity`] = (sub as any).severity;
+			out[sev] = (sub as any).severity;
 		} else if (sub && typeof sub === "object") {
 			const nested = flattenHealth(sub);
 			const empty =
 				nested && typeof nested === "object" && Object.keys(nested as object).length === 0;
-			if (nested != null && !empty) out[Array.isArray(nested) ? `${k}_severity` : k] = nested;
+			if (nested != null && !empty) out[Array.isArray(nested) ? sev : k] = nested;
+		} else if (sub !== undefined) {
+			// already-flattened scalar (2nd pass): keep it, do not silently drop
+			out[k] = sub;
 		}
 	}
 	return out;

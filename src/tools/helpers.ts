@@ -6,7 +6,12 @@ import { resolveDevice, getToken, getMaxResponseBytes } from "../config.js";
 import { fortiGet, fortiResults } from "../client.js";
 import { bounded, hardCapText } from "../bounds.js";
 import { summarizeResourceUsage } from "../summarize.js";
-import { filterAudit, filterForCurrentTool, filterMaxResponseBytes } from "../filters/index.js";
+import {
+	filterAudit,
+	filterForCurrentTool,
+	filterMaxResponseBytes,
+	groupEnabled,
+} from "../filters/index.js";
 
 export const deviceParam = {
 	device: Type.Optional(
@@ -109,7 +114,11 @@ export async function runForti(
 		let data: unknown = await fortiGet(apiPath, dev, token, opts.query || {}, signal);
 
 		if (opts.summarizeResources) {
-			data = summarizeResourceUsage(data);
+			// Gated by group resource_history — exclude:false returns the full
+			// series, still unwrapped from the FortiOS `results` envelope.
+			data = groupEnabled("resource_history")
+				? summarizeResourceUsage(data)
+				: fortiResults(data);
 		} else if (opts.useResults) {
 			data = fortiResults(data);
 		}

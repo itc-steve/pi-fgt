@@ -135,9 +135,10 @@ per session, all-hidden until you pick. Safe to delete any leftover
 
 ## Configurable response filters (v1.3)
 
-Field filtering used to be hardcoded across `src/types.ts` and `bounds.ts`, so
-users could not see or change what was being removed. It now lives in one
-config file.
+Field filtering used to be hardcoded across `src/types.ts`, `bounds.ts` and a
+dozen tool files, so users could not see or change what was being removed.
+**Every context-reduction rule now lives in one config file** — there are no
+remaining hardcoded field lists in `src/tools/`.
 
 ```bash
 cp fortigate-filters.example.json ~/.pi/agent/fortigate-filters.json
@@ -170,6 +171,32 @@ Precedence, first match wins:
 A field in an `allowlist` is immune to rule 4, so a meaningful default like
 `logtraffic: "disable"` is never silently dropped.
 
+### Structural groups
+
+Four reductions *reshape* a payload rather than drop keys, so no field list can
+express them. Each is a plain on/off group:
+
+| group | what it does | tools |
+|-------|--------------|-------|
+| `apps_compact` | `apps:[{id,name,protocol,port}]` → `["udp/53"]` | sessions, fortiview |
+| `resource_history` | CPU/mem time series → `current` + one sample | resource usage, performance |
+| `switch_port_counts` | `ports[]` → `port_count` / `ports_up` | `get_fortiswitches` |
+| `ipsec_compact` | `proxyid[]` trees → `phase2[]` + derived status | `get_ipsec_tunnels` |
+
+```jsonc
+{ "groups": { "resource_history": { "exclude": false } } }  // full CPU series
+```
+
+### Limits
+
+```jsonc
+"limits": {
+  "maxResponseBytes": null,   // null = defer to fortigate.json
+  "maxArrayItems": 20,        // array trim size when a payload is over budget
+  "maxExpandRequests": 40     // fan-out cap for get_fqdn_addresses
+}
+```
+
 ### Getting data back
 
 Every noise family is a named group with a `why`. Flip one boolean:
@@ -195,8 +222,9 @@ Invalid JSON falls back to defaults with a warning rather than breaking tools.
   `switch-controller-*`, WiFi MCS/rate-score telemetry
 - **Kept on purpose:** `country`/`srcmac` on sessions (geo + MAC correlation),
   `noise` on WiFi clients (RF floor) — both were dropped before v1.3
-- **`verbose=true` still filters** by default; set
-  `audit.verboseBypassesFilters: true` for a true raw escape hatch
+- **`verbose=true` returns raw records.** Tools documenting verbose as "full
+  records" now genuinely bypass both allowlists and groups. Set
+  `audit.verboseBypassesFilters: false` to keep filtering even on verbose calls
 
 Still prefer query filters (`source_ip`, `name=`, `up_only=true`) before
 dumping catalogs.

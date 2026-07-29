@@ -1,6 +1,7 @@
 /** GET-only FortiOS client (undici). Multi-device. tokenEnv resolved by caller. vdom always pinned. */
 
 import { fetch, Agent } from "undici";
+import { relocationMessage } from "./version.js";
 
 const DEFAULT_TIMEOUT_MS = 30_000;
 
@@ -27,10 +28,22 @@ function timeoutSignal(signal?: AbortSignal, timeoutMs = DEFAULT_TIMEOUT_MS): Ab
 /** Short hints when escape-hatch paths miss (stop blind guessing). */
 export const PATH_HINTS =
   "Bare path only (no api/v2). Common monitors: wifi/managed_ap, wifi/client, " +
-  "switch-controller/managed-switch/status, network/arp, system/dhcp, router/ipv4, firewall/session. " +
+  "switch-controller/managed-switch/status, network/arp, system/dhcp, router/ipv4, firewall/sessions. " +
   "Prefer typed tools: get_fortiaps, get_wifi_clients, get_fortiswitches, get_switch_port_status, get_arp_table.";
 
-function sanitizeError(status: number, text: string): string {
+/** FortiOS error bodies often include { version: "v7.6.7", ... }. */
+function deviceVersionFromBody(text: string): string | undefined {
+  if (!text) return undefined;
+  try {
+    const j = JSON.parse(text) as { version?: unknown };
+    if (typeof j?.version === "string") return j.version.replace(/^v/i, "");
+  } catch {
+    /* bare 404 */
+  }
+  return undefined;
+}
+
+function sanitizeError(status: number, text: string, path?: string): string {
   const safe = text
     .replace(/(bearer|token)\s+[\w.\/-]{8,}/gi, "$1 [redacted]")
     .replace(
@@ -41,6 +54,11 @@ function sanitizeError(status: number, text: string): string {
   if (status === 401) return `401 Unauthorized: token rejected for this device (check tokenEnv).`;
   if (status === 403) return `403 Forbidden: token lacks permission / trusthost / VDOM scope.`;
   if (status === 404) {
+    // Known 7.4→7.6 relocations: name the replacement so the AI does not retry/guess
+    if (path) {
+      const enriched = relocationMessage(path, deviceVersionFromBody(text));
+      if (enriched) return enriched;
+    }
     return `404 Not found (check path and VDOM). ${PATH_HINTS}`;
   }
   if (status === 400 || status === 405) {
@@ -125,7 +143,7 @@ export async function fortiGet(
     }
   }
 
-  throw new Error(sanitizeError(status, text));
+  throw new Error(sanitizeError(status, text, p));
 }
 
 export function fortiResults(data: any): any {

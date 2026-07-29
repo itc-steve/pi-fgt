@@ -7,6 +7,7 @@ import { deviceParam, textResult } from "./helpers.js";
 import { resolveDevice, getToken, getMaxResponseBytes } from "../config.js";
 import { fortiGet, fortiResults } from "../client.js";
 import { bounded } from "../bounds.js";
+import { filterMaxExpandRequests } from "../filters/index.js";
 
 export const FIREWALL_MONITOR_TOOL_NAMES = [
   "get_firewall_acl_stats",
@@ -152,7 +153,7 @@ export function registerFirewallMonitorTools(pi: ExtensionAPI): void {
         }
 
         // Expand resolved IPs (list endpoint only returns addrs_count)
-        const cap = 40;
+        const cap = filterMaxExpandRequests();
         const expanded: any[] = [];
         for (const row of list.slice(0, cap)) {
           const key = row?.name;
@@ -464,15 +465,8 @@ export function registerFirewallMonitorTools(pi: ExtensionAPI): void {
           if (nameQ) {
             data = data.filter((row: any) => String(row?.name || "").toLowerCase().includes(nameQ));
           }
-          // useful slice only — full ISDB rows are huge
-          data = data.map((row: any) => ({
-            id: row?.id,
-            name: row?.name,
-            database: row?.database,
-            direction: row?.direction,
-            ip_number: row?.["ip-number"],
-            ip_range_number: row?.["ip-range-number"],
-          }));
+          // Field selection is config-driven
+          // (filters tools.get_internet_service_basic) — full ISDB rows are huge.
         }
         data = bounded(
           data,

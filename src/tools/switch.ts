@@ -7,6 +7,7 @@ import { deviceParam, textResult } from "./helpers.js";
 import { resolveDevice, getToken, getMaxResponseBytes } from "../config.js";
 import { fortiGet, fortiResults } from "../client.js";
 import { bounded } from "../bounds.js";
+import { groupEnabled } from "../filters/index.js";
 
 
 function matchSwitch(row: any, needle: string): boolean {
@@ -40,8 +41,9 @@ export function registerSwitchTools(pi: ExtensionAPI): void {
 				),
 			);
 			// Replace the heavy ports[] array with counts; field selection itself
-			// is config-driven (filters tools.get_fortiswitches.allowlist).
-			if (!params.verbose && Array.isArray(data)) {
+			// is config-driven (filters tools.get_fortiswitches.allowlist), and the
+			// reshape is gated by group switch_port_counts.
+			if (groupEnabled("switch_port_counts") && Array.isArray(data)) {
 				data = data.map((sw: any) => {
 					const { ports: rawPorts, ...rest } = sw ?? {};
 					const ports = Array.isArray(rawPorts) ? rawPorts : [];

@@ -129,6 +129,33 @@ export function filterAudit(): FilterAudit | null {
 	};
 }
 
+/**
+ * Is a structural group active for the current tool?
+ * Used by tools that RESHAPE payloads (apps compaction, resource summarize,
+ * switch port counts, ipsec compaction) — things no key list can express.
+ * verbose= honours the same bypass rule as field filtering.
+ */
+export function groupEnabled(name: string): boolean {
+	const cfg = loadFilters();
+	if (!cfg.enabled) return false;
+	const ctx = currentTool();
+	if (ctx?.verbose && cfg.audit?.verboseBypassesFilters) return false;
+	const g = cfg.groups?.[name];
+	return ctx?.tool ? (cfg.tools?.[ctx.tool]?.groups?.[name] ?? g?.exclude ?? false) : (g?.exclude ?? false);
+}
+
+/** Array trim size for over-budget payloads (limits.maxArrayItems). */
+export function filterMaxArrayItems(): number {
+	const v = loadFilters().limits?.maxArrayItems;
+	return typeof v === "number" && v > 0 ? v : 20;
+}
+
+/** Max follow-up API calls a fan-out tool may make (limits.maxExpandRequests). */
+export function filterMaxExpandRequests(): number {
+	const v = loadFilters().limits?.maxExpandRequests;
+	return typeof v === "number" && v > 0 ? v : 40;
+}
+
 /** Byte cap: filters file may override fortigate.json. null = defer. */
 export function filterMaxResponseBytes(): number | null {
 	const v = loadFilters().limits?.maxResponseBytes;

@@ -7,6 +7,46 @@ import { deviceParam, runForti, textResult } from "./helpers.js";
 import { resolveDevice, getToken, getMaxResponseBytes } from "../config.js";
 import { fortiGet, fortiResults } from "../client.js";
 import { bounded } from "../bounds.js";
+import { ENDPOINT_RELOCATIONS } from "../version.js";
+
+/** Parse FortiOS "v7.6.7" / "7.6.7" → [7,6,7]. Numeric so 7.10 > 7.6. */
+function parseFortiVersion(raw: unknown): number[] | null {
+  if (typeof raw !== "string") return null;
+  const m = raw.replace(/^v/i, "").match(/^(\d+)\.(\d+)(?:\.(\d+))?/);
+  if (!m) return null;
+  return [Number(m[1]), Number(m[2]), Number(m[3] || 0)];
+}
+
+function versionAtLeast(v: number[], major: number, minor: number): boolean {
+  return v[0]! > major || (v[0] === major && v[1]! >= minor);
+}
+
+/**
+ * One-shot advisory for triage: device ≥7.6, bundled docs are 7.4.12, list
+ * confirmed REMOVED→replacement paths. Silent on 7.4 (docs match).
+ * Key starts with `_` so filters keep it past allowlists (engine.ts).
+ */
+function fortiosNotes(payload: any): string | undefined {
+  const raw =
+    payload?.results?.version ?? payload?.version ?? payload?.results?.os_version;
+  const v = parseFortiVersion(raw);
+  if (!v || !versionAtLeast(v, 7, 6)) return undefined;
+
+  // ponytail: only REMOVED+use entries — those are the confirmed 404→replacement pairs
+  const moves = Object.entries(ENDPOINT_RELOCATIONS)
+    .filter(([, r]) => r.kind === "REMOVED" && r.use)
+    .map(([old, r]) => {
+      const a = old.replace(/^monitor\//, "");
+      const b = r.use!.replace(/^monitor\//, "");
+      return r.note ? `${a}→${b} (${r.note})` : `${a}→${b}`;
+    });
+
+  const ver = String(raw).replace(/^v/i, "");
+  return (
+    `device ${ver} (≥7.6); bundled docs=7.4.12 (stale). ` +
+    `relocations: ${moves.join("; ")}`
+  );
+}
 
 export function registerSystemTools(pi: ExtensionAPI): void {
   pi.registerTool({
@@ -17,8 +57,30 @@ export function registerSystemTools(pi: ExtensionAPI): void {
       "First call for any triage. log_disk_status=not_available ⇒ use source=memory for logs. Read-only.",
     promptSnippet: "FortiGate system status (hostname/serial/firmware)",
     parameters: Type.Object({ ...deviceParam }),
-    async execute(_toolCallId, params, signal, onUpdate, ctx) {
-      return runForti("monitor/system/status", params, signal, onUpdate, ctx);
+    async execute(_toolCallId, params, signal, onUpdate, _ctx) {
+      try {
+        const { name, device: dev } = resolveDevice(params.device);
+        const token = getToken(dev);
+        onUpdate?.({
+          content: [{ type: "text", text: `*fg ${name} monitor/system/status*` }],
+        });
+        let data: any = await fortiGet("monitor/system/status", dev, token, {}, signal);
+        const notes = fortiosNotes(data);
+        if (notes && data && typeof data === "object" && !Array.isArray(data)) {
+          data = { ...data, _fortios_notes: notes };
+        }
+        return textResult(
+          bounded(
+            data,
+            "Narrow the query / lower count / use a single-object tool. Or set maxResponseBytes in fortigate.json.",
+            getMaxResponseBytes(),
+          ),
+          { device: name, path: "monitor/system/status" },
+        );
+      } catch (e: any) {
+        if (e?.name === "AbortError") throw e;
+        return textResult(`Error: ${e?.message || String(e)}`);
+      }
     },
   });
 
@@ -130,24 +192,15 @@ export function registerSystemTools(pi: ExtensionAPI): void {
       const token = getToken(dev);
       let data: any = fortiResults(await fortiGet("monitor/system/interface", dev, token, {}, signal));
       const nameQ = String(params.name || "").trim().toLowerCase();
-      const KEEP = [
-        "id", "name", "alias", "ip", "mask", "link", "speed", "duplex",
-        "mac", "tx_bytes", "rx_bytes", "tx_packets", "rx_packets",
-        "tx_errors", "rx_errors", "tx_dropped", "rx_dropped",
-      ];
-      if (data && typeof data === "object" && !Array.isArray(data)) {
+      // Field selection is config-driven (filters tools.get_interfaces_status);
+      // only the name= search happens here.
+      if (nameQ && data && typeof data === "object" && !Array.isArray(data)) {
         const out: Record<string, unknown> = {};
         for (const [k, v] of Object.entries(data as Record<string, any>)) {
-          if (nameQ && !k.toLowerCase().includes(nameQ) && !String(v?.name || "").toLowerCase().includes(nameQ)) {
+          if (!k.toLowerCase().includes(nameQ) && !String(v?.name || "").toLowerCase().includes(nameQ)) {
             continue;
           }
-          if (v && typeof v === "object") {
-            const slim: Record<string, unknown> = {};
-            for (const f of KEEP) if (f in v) slim[f] = v[f];
-            out[k] = slim;
-          } else {
-            out[k] = v;
-          }
+          out[k] = v;
         }
         data = out;
       }
@@ -180,21 +233,9 @@ export function registerSystemTools(pi: ExtensionAPI): void {
         const raw: any = fortiResults(
           await fortiGet("monitor/license/status", dev, token, {}, signal),
         );
-        // Health-check projection — drop no_license SaaS noise
-        const pick = (obj: any, keys: string[]) => {
-          if (!obj || typeof obj !== "object") return obj;
-          const out: Record<string, unknown> = {};
-          for (const k of keys) if (k in obj) out[k] = obj[k];
-          return out;
-        };
+        // Health subset is config-driven (filters tools.get_available_licenses).
         const data = {
-          fortiguard: pick(raw.fortiguard, ["status", "connected", "has_connected"]),
-          forticare: pick(raw.forticare, ["status", "expires", "support_level"]),
-          antivirus: pick(raw.antivirus, ["status", "expires", "version"]),
-          ips: pick(raw.ips, ["status", "expires", "version"]),
-          web_filtering: pick(raw.web_filtering, ["status", "expires"]),
-          forticloud: pick(raw.forticloud, ["status"]),
-          vdom: pick(raw.vdom, ["used", "max", "can_upgrade"]),
+          ...raw,
           _note: "health subset; pass verbose=true for full entitlement dump",
         };
         return textResult(bounded(data, "verbose=true for all entitlements.", getMaxResponseBytes()), {

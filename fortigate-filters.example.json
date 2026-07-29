@@ -224,6 +224,22 @@
       "keys": [
         "health"
       ]
+    },
+    "apps_compact": {
+      "exclude": true,
+      "why": "apps:[{id,name,protocol,protocol_str,port}] → [\"udp/53\"] on sessions/fortiview. exclude:false keeps the full app objects."
+    },
+    "resource_history": {
+      "exclude": true,
+      "why": "CPU/mem historical time series (hundreds of [ts,value] pairs per metric) collapsed to current + one sample. exclude:false returns the full series."
+    },
+    "switch_port_counts": {
+      "exclude": true,
+      "why": "get_fortiswitches ports[] replaced by port_count/ports_up. exclude:false returns every port inline (use get_switch_port_status instead)."
+    },
+    "ipsec_compact": {
+      "exclude": true,
+      "why": "get_ipsec_tunnels proxyid[] trees → phase2[] selectors + derived up/down status. exclude:false returns raw tunnel records."
     }
   },
   "tools": {
@@ -442,8 +458,7 @@
         "active_sessions",
         "bytes",
         "packets",
-        "hit_count",
-        "last_used"
+        "hit_count"
       ]
     },
     "get_fortiview_statistics": {
@@ -471,6 +486,7 @@
         "state",
         "clients",
         "local_ipv4_addr",
+        "local_addr",
         "connecting_interface",
         "board_mac",
         "join_time",
@@ -486,6 +502,9 @@
       ]
     },
     "get_wifi_clients": {
+      "keep": [
+        "host"
+      ],
       "allowlist": [
         "mac",
         "ip",
@@ -494,6 +513,7 @@
         "wtp_id",
         "wtp_ip",
         "hostname",
+        "host",
         "manufacturer",
         "os",
         "signal",
@@ -561,6 +581,102 @@
         "subtype"
       ]
     },
+    "get_interfaces_status": {
+      "allowlist": [
+        "id",
+        "name",
+        "alias",
+        "ip",
+        "mask",
+        "link",
+        "speed",
+        "duplex",
+        "mac",
+        "tx_bytes",
+        "rx_bytes",
+        "tx_packets",
+        "rx_packets",
+        "tx_errors",
+        "rx_errors",
+        "tx_dropped",
+        "rx_dropped"
+      ]
+    },
+    "get_available_licenses": {
+      "allowlist": [
+        "fortiguard",
+        "forticare",
+        "antivirus",
+        "ips",
+        "web_filtering",
+        "forticloud",
+        "vdom",
+        "support",
+        "hardware",
+        "enhanced",
+        "comprehensive",
+        "status",
+        "connected",
+        "has_connected",
+        "expires",
+        "support_level",
+        "version",
+        "used",
+        "max",
+        "can_upgrade",
+        "registration_status",
+        "account",
+        "company"
+      ]
+    },
+    "get_security_profiles": {
+      "allowlist": [
+        "name",
+        "comment"
+      ]
+    },
+    "get_internet_service_basic": {
+      "allowlist": [
+        "id",
+        "name",
+        "database",
+        "direction",
+        "ip-number",
+        "ip-range-number"
+      ]
+    },
+    "get_wifi_rogue_aps": {
+      "allowlist": [
+        "ssid",
+        "mac",
+        "manufacturer",
+        "security_mode",
+        "signal_strength",
+        "channel",
+        "is_fake",
+        "is_dead",
+        "wtp_count",
+        "wtp_ip",
+        "last_seen"
+      ]
+    },
+    "get_ipsec_tunnels": {
+      "allowlist": [
+        "name",
+        "rgwy",
+        "type",
+        "connection_count",
+        "incoming_bytes",
+        "outgoing_bytes",
+        "comments",
+        "status",
+        "phase2",
+        "p2name",
+        "src",
+        "dst",
+        "expire"
+      ]
+    },
     "get_switch_port_status": {
       "allowlist": [
         "interface",
@@ -581,10 +697,11 @@
   },
   "limits": {
     "maxResponseBytes": null,
-    "maxArrayItems": 20
+    "maxArrayItems": 20,
+    "maxExpandRequests": 40
   },
   "audit": {
     "annotate": true,
-    "verboseBypassesFilters": false
+    "verboseBypassesFilters": true
   }
 }

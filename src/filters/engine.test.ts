@@ -7,7 +7,12 @@
 import assert from "node:assert/strict";
 import { DEFAULT_FILTERS, type FilterConfig } from "./defaults.js";
 import { applyFilters, compile, type FilterStats } from "./engine.js";
-import { withToolContext, filterForCurrentTool, filterAudit } from "./index.js";
+import {
+	withToolContext,
+	filterForCurrentTool,
+	filterAudit,
+	groupEnabled,
+} from "./index.js";
 
 const fresh = (): FilterStats => ({ keysDropped: 0, groups: new Set() });
 
@@ -187,6 +192,21 @@ const AP_CLIENT = {
 		!JSON.stringify(out.health).includes('"value"'),
 		"no raw value/severity pairs may survive flattening",
 	);
+
+	// filterForCurrentTool runs twice per tool call (bounded + textResult).
+	// Flattening must be idempotent or suffixes stack:
+	// uplink_status_severity_severity_severity (seen live on 7.6.7).
+	withToolContext("get_fortiaps", false, () => {
+		const p1: any = filterForCurrentTool([ap]);
+		const p2: any = filterForCurrentTool(p1);
+		const p3: any = filterForCurrentTool(p2);
+		assert.deepEqual(p2[0].health, p1[0].health, "2nd filter pass must not re-suffix");
+		assert.deepEqual(p3[0].health, p1[0].health, "3rd filter pass must not re-suffix");
+		assert.ok(
+			!JSON.stringify(p3).includes("_severity_severity"),
+			"severity suffix must never stack",
+		);
+	});
 }
 
 // --- 7. idempotent (bounded() + textResult() both filter) -------------------
@@ -265,10 +285,19 @@ const AP_CLIENT = {
 		assert.ok(audit!.groups.includes("uuid"));
 	});
 
-	// verboseBypassesFilters defaults to false → verbose is still filtered
+	// verboseBypassesFilters defaults to true — verbose=true is documented as
+	// "full records", so it must lift the allowlist AND the groups.
 	withToolContext("get_firewall_policies", true, () => {
 		const out: any = filterForCurrentTool([POLICY_E2E]);
-		assert.equal(out[0].uuid, undefined, "verbose must still filter by default");
+		assert.equal(out[0].uuid, POLICY_E2E.uuid, "verbose must return full records");
+	});
+
+	// structural groups follow the same gate
+	withToolContext("get_fortiswitches", false, () => {
+		assert.equal(groupEnabled("switch_port_counts"), true, "structural group on by default");
+	});
+	withToolContext("get_fortiswitches", true, () => {
+		assert.equal(groupEnabled("switch_port_counts"), false, "verbose must disable reshaping");
 	});
 
 	// bounded() and textResult() both filter; stats must not double-count
@@ -280,4 +309,4 @@ const AP_CLIENT = {
 	});
 }
 
-console.log("filters ok — 14 checks passed");
+console.log("filters ok");

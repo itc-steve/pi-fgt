@@ -37,17 +37,8 @@ export function registerSecurityTools(pi: ExtensionAPI): void {
 			const table = ALLOWED_PROFILE_TYPES[pt];
 			const { name, device: dev } = resolveDevice(params.device);
 			const token = getToken(dev);
+			// Field selection is config-driven (filters tools.get_security_profiles).
 			let data = fortiResults(await fortiGet(`cmdb/${table}`, dev, token, {}, signal));
-			if (!params.verbose && Array.isArray(data)) {
-				data = data
-					.filter((item: unknown) => item && typeof item === "object")
-					.map((item: Record<string, unknown>) => {
-						const out: Record<string, unknown> = {};
-						if ("name" in item) out.name = item.name;
-						if ("comment" in item) out.comment = item.comment;
-						return out;
-					});
-			}
 			data = bounded(
 				data,
 				"Set verbose=True for full profile bodies (these can be very large).",

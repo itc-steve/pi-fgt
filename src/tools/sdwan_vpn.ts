@@ -39,8 +39,10 @@ export function registerSdwanVpnTools(pi: ExtensionAPI): void {
           data = {
             _empty: true,
             _hint:
-              "No SD-WAN health-check results (none configured or not running). " +
-              "Use get_sdwan_members for per-member link/up bandwidth/sessions; get_sdwan_sla_log if SLA is defined.",
+              "No SD-WAN health-check results — none configured or not running on this device. " +
+              "On FortiOS 7.6.4+ this endpoint is deprecated (returns {} even when present). " +
+              "Use get_sdwan_sla_log with latest=true (and sla=\"<name>\") for SLA metrics, " +
+              "or get_sdwan_members for per-link up/bandwidth/sessions. Read-only.",
           };
         }
         data = bounded(data, "Narrow the query if truncated.", getMaxResponseBytes());

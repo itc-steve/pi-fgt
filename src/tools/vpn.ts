@@ -7,6 +7,7 @@ import { deviceParam, runForti, textResult } from "./helpers.js";
 import { resolveDevice, getToken, getMaxResponseBytes } from "../config.js";
 import { fortiGet, fortiResults } from "../client.js";
 import { bounded } from "../bounds.js";
+import { groupEnabled } from "../filters/index.js";
 
 export function registerVpnTools(pi: ExtensionAPI): void {
   pi.registerTool({
@@ -57,8 +58,9 @@ export function registerVpnTools(pi: ExtensionAPI): void {
       const nameQ = String(params.name || "").trim().toLowerCase();
       if (nameQ) data = data.filter((t: any) => String(t?.name || "").toLowerCase().includes(nameQ));
 
-      if (!params.verbose) {
-        // Compact ops view — full proxyid trees are noisy
+      // Compact ops view — full proxyid trees are noisy.
+      // Reshape gated by group ipsec_compact; fields by tools.get_ipsec_tunnels.
+      if (groupEnabled("ipsec_compact")) {
         data = data.map((t: any) => {
           const selectors = Array.isArray(t?.proxyid)
             ? t.proxyid.map((p: any) => ({

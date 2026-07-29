@@ -433,11 +433,12 @@ export function registerMiscTools(pi: ExtensionAPI): void {
         const rows = Array.isArray(data) ? data : Array.isArray(data?.details) ? data.details : null;
         // Field selection is config-driven (filters tools.get_fortiview_statistics);
         // only apps[] compaction happens here.
-        if (rows && !params.verbose) {
+        if (rows) {
           const projected = rows.map((row: any) => {
             const out = { ...row };
             const apps = compactApps(row.apps);
-            if (apps) out.apps = apps;
+            if (!apps) return out; // apps_compact off → leave raw objects
+            out.apps = apps;
             // prefer name×count form when the API supplies counts
             if (Array.isArray(row.apps) && row.apps.some((a: any) => a?.count != null)) {
               out.apps = row.apps

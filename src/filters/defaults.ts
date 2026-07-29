@@ -59,7 +59,10 @@ export interface FilterConfig {
 	tools: Record<string, ToolOverride>;
 	limits: {
 		maxResponseBytes?: number | null;
+		/** Arrays longer than this are trimmed when a payload is over budget. */
 		maxArrayItems?: number;
+		/** Max follow-up API calls a tool may fan out (get_fqdn_addresses). */
+		maxExpandRequests?: number;
 	};
 	audit: {
 		annotate: boolean;
@@ -211,6 +214,27 @@ export const DEFAULT_FILTERS: FilterConfig = {
 			why: "health:{x:{value,severity}} on APs/clients. flatten=true collapses to x_severity, keeping the verdict at ~60% of the bytes.",
 			keys: ["health"],
 		},
+
+		// --- structural groups -------------------------------------------
+		// These RESHAPE a payload (rename / derive / aggregate) rather than drop
+		// keys, so they cannot be expressed as key lists. The tool code asks
+		// groupEnabled(name); exclude:false returns the raw FortiOS structure.
+		apps_compact: {
+			exclude: true,
+			why: "apps:[{id,name,protocol,protocol_str,port}] → [\"udp/53\"] on sessions/fortiview. exclude:false keeps the full app objects.",
+		},
+		resource_history: {
+			exclude: true,
+			why: "CPU/mem historical time series (hundreds of [ts,value] pairs per metric) collapsed to current + one sample. exclude:false returns the full series.",
+		},
+		switch_port_counts: {
+			exclude: true,
+			why: "get_fortiswitches ports[] replaced by port_count/ports_up. exclude:false returns every port inline (use get_switch_port_status instead).",
+		},
+		ipsec_compact: {
+			exclude: true,
+			why: "get_ipsec_tunnels proxyid[] trees → phase2[] selectors + derived up/down status. exclude:false returns raw tunnel records.",
+		},
 	},
 
 	// allowlist = ONLY these fields come back (strongest filter, applied last).
@@ -309,9 +333,10 @@ export const DEFAULT_FILTERS: FilterConfig = {
 			],
 		},
 		get_policy_hit_counts: {
+			// last_used is gone on 7.6.7 (never present in live capture).
+			// asic/software/nturbo splits: verbose path bypasses this allowlist.
 			allowlist: [
-				"policyid", "active_sessions", "bytes", "packets",
-				"hit_count", "last_used",
+				"policyid", "active_sessions", "bytes", "packets", "hit_count",
 			],
 		},
 		get_fortiview_statistics: {
@@ -324,16 +349,24 @@ export const DEFAULT_FILTERS: FilterConfig = {
 		get_fortiaps: {
 			allowlist: [
 				"name", "serial", "status", "state", "clients",
-				"local_ipv4_addr", "connecting_interface", "board_mac",
+				// 7.6.7 renames local_ipv4_addr → local_addr; keep both for 7.4 boxes
+				"local_ipv4_addr", "local_addr", "connecting_interface", "board_mac",
 				"join_time", "os_version", "ap_profile", "cpu_usage",
 				"mem_free", "mem_total", "health", "last_failure",
 				"last_reboot_time", "wan_status",
 			],
 		},
 		get_wifi_clients: {
+			// host is in group duplicate_identity (dropKeys). Allowlist alone is
+			// not enough: allowlist projects first, then dropReason still kills
+			// dropKeys. keep[] is the only per-key override that beats every drop
+			// rule. groups:{duplicate_identity:false} would also re-admit wtp_name
+			// etc.; keep is the narrower fix.
+			keep: ["host"],
 			allowlist: [
 				"mac", "ip", "ssid", "vap_name", "wtp_id", "wtp_ip",
-				"hostname", "manufacturer", "os", "signal", "snr", "channel",
+				// 7.6.7 renames hostname → host; keep both for 7.4 boxes
+				"hostname", "host", "manufacturer", "os", "signal", "snr", "channel",
 				"vlan_id", "radio_type", "mimo", "bandwidth_tx", "bandwidth_rx",
 				"security_str", "authentication", "channel", "idle_time",
 				"data_rate_bps", "health",
@@ -361,6 +394,52 @@ export const DEFAULT_FILTERS: FilterConfig = {
 				"type", "subtype",
 			],
 		},
+		get_interfaces_status: {
+			allowlist: [
+				"id", "name", "alias", "ip", "mask", "link", "speed", "duplex",
+				"mac", "tx_bytes", "rx_bytes", "tx_packets", "rx_packets",
+				"tx_errors", "rx_errors", "tx_dropped", "rx_dropped",
+			],
+		},
+		get_available_licenses: {
+			// Both the category names (top level) and the leaf fields inside them.
+			// Categories left out here (appctrl, sms, …) are dropped whole.
+			// 7.6.7: support_level is NOT a forticare leaf; it lives under
+			// forticare.support.{hardware,enhanced,comprehensive}.{support_level,
+			// status,expires}, so those wrapper keys must be allowlisted too or the
+			// whole support/entitlement block is dropped.
+			allowlist: [
+				"fortiguard", "forticare", "antivirus", "ips", "web_filtering",
+				"forticloud", "vdom",
+				"support", "hardware", "enhanced", "comprehensive",
+				"status", "connected", "has_connected", "expires",
+				"support_level", "version", "used", "max", "can_upgrade",
+				"registration_status", "account", "company",
+			],
+		},
+		get_security_profiles: {
+			allowlist: ["name", "comment"],
+		},
+		get_internet_service_basic: {
+			allowlist: [
+				"id", "name", "database", "direction",
+				"ip-number", "ip-range-number",
+			],
+		},
+		get_wifi_rogue_aps: {
+			allowlist: [
+				"ssid", "mac", "manufacturer", "security_mode", "signal_strength",
+				"channel", "is_fake", "is_dead", "wtp_count", "wtp_ip", "last_seen",
+			],
+		},
+		get_ipsec_tunnels: {
+			// Applied to the compact view built when group ipsec_compact is on.
+			allowlist: [
+				"name", "rgwy", "type", "connection_count",
+				"incoming_bytes", "outgoing_bytes", "comments", "status",
+				"phase2", "p2name", "src", "dst", "expire",
+			],
+		},
 		get_switch_port_status: {
 			allowlist: [
 				"interface", "status", "speed", "duplex", "vlan",
@@ -375,10 +454,14 @@ export const DEFAULT_FILTERS: FilterConfig = {
 		// null = defer to maxResponseBytes in fortigate.json (single source of truth)
 		maxResponseBytes: null,
 		maxArrayItems: 20,
+		maxExpandRequests: 40,
 	},
 
 	audit: {
 		annotate: true,
-		verboseBypassesFilters: false,
+		// verbose=true is a documented per-tool escape hatch ("full records"), so it
+		// must also lift the allowlist — otherwise verbose silently returns the same
+		// projected fields. Set false to keep filtering even on verbose calls.
+		verboseBypassesFilters: true,
 	},
 };
