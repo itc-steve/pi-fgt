@@ -26,10 +26,25 @@ function timeoutSignal(signal?: AbortSignal, timeoutMs = DEFAULT_TIMEOUT_MS): Ab
 }
 
 /** Short hints when escape-hatch paths miss (stop blind guessing). */
-export const PATH_HINTS =
-  "Bare path only (no api/v2). Common monitors: wifi/managed_ap, wifi/client, " +
+export const MONITOR_HINTS =
+  "Bare path only (no api/v2). Common monitor paths: wifi/managed_ap, wifi/client, " +
   "switch-controller/managed-switch/status, network/arp, system/dhcp, router/ipv4, firewall/sessions. " +
   "Prefer typed tools: get_fortiaps, get_wifi_clients, get_fortiswitches, get_switch_port_status, get_arp_table.";
+
+export const CMDB_HINTS =
+  "Bare path only (no api/v2). Common cmdb tables: firewall/policy, firewall/address, " +
+  "system/interface, system/zone, router/static, wireless-controller/wtp, switch-controller/managed-switch. " +
+  "Live state (wifi/*, network/arp, firewall/sessions, router/ipv4) is NOT in cmdb — use get_monitor_resource. " +
+  "Prefer typed tools: get_firewall_policies, get_address_objects, get_interfaces_config.";
+
+/** Generic fallback; kept for callers without a namespaced path. */
+export const PATH_HINTS = MONITOR_HINTS;
+
+/** Pick hints matching the namespace actually requested (cmdb vs monitor). */
+function hintsFor(path?: string): string {
+  if (path && /^cmdb\//i.test(path)) return CMDB_HINTS;
+  return MONITOR_HINTS;
+}
 
 /** FortiOS error bodies often include { version: "v7.6.7", ... }. */
 function deviceVersionFromBody(text: string): string | undefined {
@@ -59,10 +74,13 @@ function sanitizeError(status: number, text: string, path?: string): string {
       const enriched = relocationMessage(path, deviceVersionFromBody(text));
       if (enriched) return enriched;
     }
-    return `404 Not found (check path and VDOM). ${PATH_HINTS}`;
+    return `404 Not found (check path and VDOM). ${hintsFor(path)}`;
   }
   if (status === 400 || status === 405) {
-    return `FortiGate API error ${status}: bad or non-GET path for this resource. ${PATH_HINTS} Body: ${safe}`;
+    const why = /^cmdb\//i.test(path || "")
+      ? `no such cmdb table (a monitor-only resource returns ${status} here, not 404)`
+      : "bad or non-GET path for this resource";
+    return `FortiGate API error ${status}: ${why}. ${hintsFor(path)} Body: ${safe}`;
   }
   if (status === 424) {
     return (

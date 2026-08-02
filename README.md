@@ -1,8 +1,74 @@
-# pi-fgt
+<p align="center">
+  <img src="./assets/readme/hero.svg" width="100%" alt="pi-fgt — 191 read-only FortiGate tools for the pi coding agent. Multi-device, session-gated, never writes.">
+</p>
 
-Pi extension: read-only FortiGate tools (191) via FortiOS REST. Multi-device. **No writes ever.** No MCP.
+<p align="center">
+  <a href="https://www.npmjs.com/package/@itc-steve/pi-fgt"><img alt="npm" src="https://img.shields.io/npm/v/@itc-steve/pi-fgt?style=flat-square&color=3ecf8e&labelColor=0a0c0f"></a>
+  <a href="./LICENSE"><img alt="MIT" src="https://img.shields.io/badge/license-MIT-8a9099?style=flat-square&labelColor=0a0c0f"></a>
+  <img alt="GET only" src="https://img.shields.io/badge/writes-never-3ecf8e?style=flat-square&labelColor=0a0c0f">
+  <img alt="tools" src="https://img.shields.io/badge/tools-191-f4f1ea?style=flat-square&labelColor=0a0c0f">
+</p>
 
-> **Not affiliated with Fortinet.** This is an independent open-source project. FortiGate, FortiOS, FortiAP, FortiSwitch, FortiGuard, and related names are trademarks of Fortinet, Inc.
+> **Not affiliated with Fortinet.** Independent open-source project. FortiGate, FortiOS, FortiAP, FortiSwitch, FortiGuard, and related names are trademarks of Fortinet, Inc.
+
+## What it is
+
+**pi-fgt** is a [pi](https://github.com/badlogic/pi-mono) coding-agent extension that turns FortiOS REST into 191 typed, read-only tools. Point it at one FortiGate or many. The model only sees the devices you pick for *this* session. It never writes.
+
+No MCP server. No write verbs. Tokens stay in env files.
+
+## Proof
+
+<p align="center">
+  <img src="./assets/readme/proof.svg" width="100%" alt="Live FGT70F measurement: 434 KB raw responses reduced to 45 KB (90%) with default filters across 8 common tools.">
+</p>
+
+| tool | raw | filtered | cut |
+|------|-----|----------|-----|
+| `get_interfaces_config` | 178.9 KB | 3.9 KB | 98% |
+| `get_firewall_policies` | 41.0 KB | 2.7 KB | 93% |
+| `get_address_objects` | 168.5 KB | 17.7 KB | 89% |
+| `get_fortiaps` | 9.0 KB | 1.6 KB | 82% |
+| `get_firewall_sessions` | 14.5 KB | 6.5 KB | 55% |
+
+Measured on a live FGT70F (v7.4.12), default filters. Flip any group off in `fortigate-filters.json` when you need the raw fields back. `verbose=true` still returns full records.
+
+## Guarantees
+
+<p align="center">
+  <img src="./assets/readme/guarantees.svg" width="100%" alt="Safety boundaries: GET only, write refusal, VDOM pinned, env-only tokens, path validation, session opt-in devices.">
+</p>
+
+- GET only
+- `attempt_write_operation` refuses with no network I/O
+- VDOM pinned from device config — caller cannot override
+- Path/name validation on escape hatches and ids
+- Response size cap + configurable field filtering
+- Tokens only via env / `fortigate.env`
+- Device exposure is opt-in per session, in-memory, never persisted
+
+## How it works
+
+<p align="center">
+  <img src="./assets/readme/workflow.svg" width="100%" alt="Session flow: install, configure json+env+filters, pick devices with /fortigate, then run GET-only tools.">
+</p>
+
+Three files side by side. Config defines what *exists*. The picker decides what the AI *sees*.
+
+| File | Purpose |
+|------|---------|
+| `~/.pi/agent/fortigate.json` | Device names, URL, VDOM, `tokenEnv` **name**, `sessionDefault` (no secrets) |
+| `~/.pi/agent/fortigate.env` | Actual tokens as `KEY=value` |
+| `~/.pi/agent/fortigate-filters.json` | Which response fields reach the AI (optional — defaults apply if absent) |
+
+**Every FortiGate is hidden from the AI by default, every session.** `/fortigate` opens a picker (↑↓ move, enter/space toggle, `/` search, esc done). Unselected devices are invisible to the model — not listed by `list_fortigate_devices`, not resolvable by any tool. You still see all of them in the picker.
+
+Selection is in-memory and per pi session:
+
+- Nothing written to disk — no state file, no save command
+- Other pi terminals are unaffected
+- `/new`, restart, or `/fortigate off` → back to all-hidden
+- **No config setting can pre-select a device**
 
 ## Install
 
@@ -18,66 +84,17 @@ pi install /path/to/pi-fgt
 
 Then `/reload`.
 
-## Enable / disable tools (per session)
-
-FortiGate tools register at load but stay **inactive by default** each new session.
-
-| Command | Effect |
-|---------|--------|
-| `/fortigate` or `/fortigate on` | Enable tools **and open the device picker** for this session |
-| `/fortigate off` | Disable tools and clear the device selection |
-| `/fortigate toggle` | Off → on+picker, on → off |
-| `/fortigate status` | Show on/off + which devices the AI can see |
-| `/fortigate filters` | Show which response fields are excluded, and from which config |
-
-## Device selection (the picker)
-
-**Every FortiGate is hidden from the AI by default, every session.** `/fortigate`
-and `/fortigate on` open a picker (↑↓ move, enter/space toggle, `/` search, esc
-done) where you turn on just the devices this session should expose.
-
-Unselected devices are invisible to the *model*: not listed by
-`list_fortigate_devices`, not resolvable by any tool. You still see all of them
-in the picker — it hides them from the AI, not from you. The point is to stop
-the model getting confused when it has to match your loose wording ("the edge
-one") against a long list of FortiGates.
-
-Selection is **in-memory and per pi session**:
-
-- Nothing is written to disk — there is no state file and no save command.
-- Other pi terminals are unaffected; each session picks its own devices.
-- `/new`, restart, or `/fortigate off` → back to all-hidden.
-- **No config setting can pre-select a device.** `fortigate.json` defines what
-  *exists*; only the picker decides what the AI *sees*.
-
-Config knob (tools only — does not affect device visibility):
-
-```json
-"sessionDefault": "off"
-```
-
-Set `"on"` to auto-activate the tools each session; devices still start hidden
-until you run `/fortigate`.
-
-## Config (three files side by side)
-
-| File | Purpose |
-|------|---------|
-| `~/.pi/agent/fortigate.json` | Device names, URL, VDOM, `tokenEnv` **name**, `sessionDefault` (no secrets) |
-| `~/.pi/agent/fortigate.env` | Actual tokens as `KEY=value` |
-| `~/.pi/agent/fortigate-filters.json` | Which response fields reach the AI (optional — defaults apply if absent) |
+### First session
 
 ```bash
-# after pi install, examples live under the package install path, or copy from a checkout:
 cp /path/to/pi-fgt/fortigate.json.example ~/.pi/agent/fortigate.json
 cp /path/to/pi-fgt/fortigate.env.example  ~/.pi/agent/fortigate.env
 chmod 600 ~/.pi/agent/fortigate.env
 # optional — only if you want to change what gets filtered out:
 cp /path/to/pi-fgt/fortigate-filters.example.json ~/.pi/agent/fortigate-filters.json
-# edit as needed
 ```
 
-### `fortigate.json`
+`fortigate.json`:
 
 ```json
 {
@@ -94,10 +111,10 @@ cp /path/to/pi-fgt/fortigate-filters.example.json ~/.pi/agent/fortigate-filters.
 }
 ```
 
-### `fortigate.env` (secrets)
+`fortigate.env` (secrets):
 
 ```bash
-FORTIGATE_EDGE_TOKEN=your-rest-api-token-here
+FORTIGATE_EDGE_TOKEN=your-rest-api-token
 ```
 
 Token resolve order:
@@ -107,58 +124,54 @@ Token resolve order:
 
 Never put the token string in the JSON.
 
-Every tool accepts optional `device` (name key). Omit only when exactly one
-device is selected for the session; otherwise pass `device=`.
-Devices not selected in `/fortigate` are not resolvable at all. Device names are matched
-case-insensitively, by unique substring, and by word tokens (e.g. `edge`
-or `edge fw` → `edge-fw`; `dc core` → `dc-core-fw`).
-Ambiguous input lists the candidates instead of guessing.
-Use `list_fortigate_devices` if unsure — do not read `fortigate.json` for secrets.
+### Session commands
 
-## Guarantees
+| Command | Effect |
+|---------|--------|
+| `/fortigate` or `/fortigate on` | Enable tools **and open the device picker** |
+| `/fortigate off` | Disable tools and clear device selection |
+| `/fortigate toggle` | Off → on+picker, on → off |
+| `/fortigate status` | Show on/off + which devices the AI can see |
+| `/fortigate filters` | Show which response fields are excluded |
 
-- GET only
-- `attempt_write_operation` refuses, no network I/O
-- VDOM pinned from device config; caller cannot override
-- Path/name validation on escape hatches + ids
-- Response size cap + configurable field filtering
-- Tokens only via env / fortigate.env
-- Device exposure is opt-in per session, in-memory, never persisted
+Set `"sessionDefault": "on"` to auto-activate tools each session; devices still start hidden until you run `/fortigate`.
 
-## Session-scoped device exposure (v1.2)
+Every tool accepts optional `device` (name key). Omit only when exactly one device is selected. Names match case-insensitively, by unique substring, and by word tokens (`edge` or `edge fw` → `edge-fw`). Ambiguous input lists candidates instead of guessing.
 
-Device visibility used to live in `~/.pi/agent/fortigate.state.json`, which was
-read and rewritten globally — toggling a device in one terminal silently changed
-every other running pi session. That file is gone. Selection is now in-memory,
-per session, all-hidden until you pick. Safe to delete any leftover
-`~/.pi/agent/fortigate.state.json`; it is no longer read.
+## Tools
 
-## Configurable response filters (v1.3)
+191 read-only tools. GET only. Prefer typed tools over guessing escape-hatch paths.
 
-Field filtering used to be hardcoded across `src/types.ts`, `bounds.ts` and a
-dozen tool files, so users could not see or change what was being removed.
-**Every context-reduction rule now lives in one config file** — there are no
-remaining hardcoded field lists in `src/tools/`.
+| Area | File | Coverage |
+|------|------|----------|
+| System / health | `system.ts`, `system_health.ts` | status, resources, performance, storage, VM, vdom, processes, NTP, PoE, transceivers, FQDN |
+| System / fabric | `system_fabric.ts` | Security Fabric, HA, cluster/SLBC, FortiManager, sandbox, SDN, botnet, config revisions |
+| Network | `network.ts`, `misc.ts` | routing, ARP, DHCP, sessions, policy hits, LLDP, DNS, DDNS |
+| Router | `router.ts` | IPv6 RIB, BGP, OSPF, policy routes, SD-WAN routes, route lookup |
+| Firewall (config) | `firewall.ts` | policies, addresses, services, VIPs, ippools, routes, interfaces, zones |
+| Firewall (live) | `firewall_monitor.ts` | ACL/DNAT/SNAT stats, proxy sessions, shapers, LB health |
+| VPN / SD-WAN | `vpn.ts`, `sdwan_vpn.ts` | IPsec, SSL-VPN, SD-WAN health/members/SLA |
+| Wireless | `wireless.ts`, `wifi.ts` | FortiAPs, clients, rogue APs, stats, firmware, NAC |
+| Switch | `switch.ts`, `switch_monitor.ts` | FortiSwitch status/ports, health, PoE, NAC devices |
+| Users | `users.ts` | firewall/proxy users, banned, device store, FSSO, FortiToken |
+| UTM / endpoint | `security.ts`, `utm_endpoint.ts` | UTM profiles, AV/IPS/webfilter stats, EMS, wanopt |
+| Admin / logs | `admin.ts`, `logs.ts`, `misc.ts` | admins, profiles, logs, license/FortiGuard, FortiView |
+| Escape | `escape.ts` | generic cmdb/monitor GET + write refusal |
+
+All 288 documented FortiOS 7.4 GET endpoints are either a typed tool or reachable via `get_config_object` / `get_monitor_resource`.
+
+## Response filters
+
+Every context-reduction rule lives in one config file. No hardcoded field lists remain in `src/tools/`.
 
 ```bash
 cp fortigate-filters.example.json ~/.pi/agent/fortigate-filters.json
 ```
 
-Run `/fortigate filters` to see what is currently excluded and from where.
-Responses that lost fields carry a `_filtered` stamp naming the groups, so the
-model can tell you what it did not receive.
+Run `/fortigate filters` to see what is currently excluded. Responses that lost fields carry a `_filtered` stamp naming the groups.
 
-**Measured on a live FGT70F (v7.4.12), defaults, 8 common tools: 434KB → 45KB (90%).**
-
-| tool | raw | filtered | cut |
-|------|-----|----------|-----|
-| `get_interfaces_config` | 178.9 KB | 3.9 KB | 98% |
-| `get_firewall_policies` | 41.0 KB | 2.7 KB | 93% |
-| `get_address_objects` | 168.5 KB | 17.7 KB | 89% |
-| `get_fortiaps` | 9.0 KB | 1.6 KB | 82% |
-| `get_firewall_sessions` | 14.5 KB | 6.5 KB | 55% |
-
-### How it works
+<details>
+<summary><strong>Filter precedence, groups, and defaults</strong></summary>
 
 Precedence, first match wins:
 
@@ -168,13 +181,11 @@ Precedence, first match wins:
 4. `dropValues` — `byValue` placeholders, `disableDefaults`
 5. `dropEmpty` — empty string / array / object / null
 
-A field in an `allowlist` is immune to rule 4, so a meaningful default like
-`logtraffic: "disable"` is never silently dropped.
+A field in an `allowlist` is immune to rule 4, so a meaningful default like `logtraffic: "disable"` is never silently dropped.
 
 ### Structural groups
 
-Four reductions *reshape* a payload rather than drop keys, so no field list can
-express them. Each is a plain on/off group:
+Four reductions *reshape* a payload rather than drop keys:
 
 | group | what it does | tools |
 |-------|--------------|-------|
@@ -205,50 +216,30 @@ Every noise family is a named group with a `why`. Flip one boolean:
 { "groups": { "uuid": { "exclude": false } } }   // UUIDs return everywhere
 ```
 
-Re-enabling a group also re-admits its fields past a tool allowlist, so this
-works even for tools with a strict allowlist. To lift an allowlist entirely:
+Re-enabling a group also re-admits its fields past a tool allowlist. To lift an allowlist entirely:
 
 ```jsonc
 { "tools": { "get_firewall_policies": { "allowlist": null } } }
 ```
 
-Your file is deep-merged over the defaults — only specify what you change.
-Invalid JSON falls back to defaults with a warning rather than breaking tools.
+Your file is deep-merged over the defaults — only specify what you change. Invalid JSON falls back to defaults with a warning rather than breaking tools.
 
 ### Defaults worth knowing
 
-- **Excluded:** `uuid`, ZTNA, IPv6 blocks, DiffServ/ToS, PPTP/L2TP, `*-negate`,
-  duplicate identity fields (`wtp_name` = `wtp_id`), FortiOS internal indexes,
-  `switch-controller-*`, WiFi MCS/rate-score telemetry
-- **Kept on purpose:** `country`/`srcmac` on sessions (geo + MAC correlation),
-  `noise` on WiFi clients (RF floor) — both were dropped before v1.3
-- **`verbose=true` returns raw records.** Tools documenting verbose as "full
-  records" now genuinely bypass both allowlists and groups. Set
-  `audit.verboseBypassesFilters: false` to keep filtering even on verbose calls
+- **Excluded:** `uuid`, ZTNA, IPv6 blocks, DiffServ/ToS, PPTP/L2TP, `*-negate`, duplicate identity fields, FortiOS internal indexes, `switch-controller-*`, WiFi MCS/rate-score telemetry
+- **Kept on purpose:** `country`/`srcmac` on sessions, `noise` on WiFi clients
+- **`verbose=true` returns raw records.** Set `audit.verboseBypassesFilters: false` to keep filtering even on verbose calls
 
-Still prefer query filters (`source_ip`, `name=`, `up_only=true`) before
-dumping catalogs.
+Still prefer query filters (`source_ip`, `name=`, `up_only=true`) before dumping catalogs.
 
-## Tools
+</details>
 
-191 read-only tools. GET only. Grouped by `src/tools/*.ts`:
+## Notes
 
-| Area | File | Coverage |
-|------|------|----------|
-| System / health | `system.ts`, `system_health.ts` | status, resources, performance, storage, VM, vdom/global resources, processes, NTP, PoE, transceivers, traffic history, FQDN resolve, ipconf |
-| System / fabric | `system_fabric.ts` | Security Fabric (CSF), HA checksums/history, cluster/SLBC, central-mgmt, FortiManager, sandbox, security-rating, SDN, botnet, config revisions |
-| Network | `network.ts`, `misc.ts` | routing, ARP, DHCP, sessions, policy hits, LLDP, DNS latency, DDNS, reverse-IP |
-| Router | `router.ts` | IPv6 RIB, BGP neighbors/paths, OSPF, policy routes, SD-WAN routes, route lookup |
-| Firewall (config) | `firewall.ts` | policies, addresses, services, VIPs, ippools, routes, interfaces, zones |
-| Firewall (live) | `firewall_monitor.ts` | ACL/DNAT/SNAT stats, proxy sessions, local-in, shapers, internet-service lookup, LB health, UUID list |
-| VPN / SD-WAN | `vpn.ts`, `sdwan_vpn.ts` | IPsec p1/p2/tunnels, SSL-VPN sessions+stats, SD-WAN health/members/SLA |
-| Wireless | `wireless.ts`, `wifi.ts` | FortiAPs, clients, rogue/interfering APs, stats, firmware, NAC |
-| Switch | `switch.ts`, `switch_monitor.ts` | FortiSwitch status/ports, health, transceivers, PoE, detected/NAC devices |
-| Users | `users.ts` | firewall/proxy users, banned, device store, FSSO, FortiToken |
-| UTM / endpoint | `security.ts`, `utm_endpoint.ts` | UTM profiles, AV/IPS/webfilter stats, endpoint-control/EMS, wanopt, webcache |
-| Admin / logs / misc | `admin.ts`, `logs.ts`, `misc.ts` | admins, profiles, `list_fortigate_devices`, logs, license/registration/FortiGuard, extenders, FortiView |
-| Escape | `escape.ts` | generic cmdb/monitor GET + write refusal |
+**Session-scoped device exposure (v1.2).** Device visibility used to live in `~/.pi/agent/fortigate.state.json` and was rewritten globally across terminals. That file is gone. Selection is in-memory, per session, all-hidden until you pick. Safe to delete any leftover `fortigate.state.json`.
 
-Prefer typed tools over guessing escape-hatch paths. All 288 documented FortiOS
-7.4 GET endpoints are either wrapped as a typed tool or reachable via the
-`get_config_object` / `get_monitor_resource` escape hatches.
+**FortiOS 7.6.** Some monitor endpoints relocated; the client surfaces relocation hints on 404. See [`docs/fortios-version-notes.md`](./docs/fortios-version-notes.md).
+
+## License
+
+[MIT](./LICENSE) © [itc-steve](https://github.com/itc-steve)

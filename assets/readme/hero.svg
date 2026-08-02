@@ -1,0 +1,53 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="360" viewBox="0 0 1200 360" role="img" aria-labelledby="title desc">
+  <title id="title">pi-fgt — read-only FortiGate tools for the pi coding agent</title>
+  <desc id="desc">Monochrome technical hero: 191 GET-only FortiOS tools, multi-device, session-gated exposure. Right side shows config, session picker, and a live GET path.</desc>
+
+  <rect width="1200" height="360" rx="26" fill="#0a0c0f"/>
+  <path d="M0 52H1200M718 0V360" stroke="#1e2228" stroke-width="1"/>
+
+  <!-- left: identity -->
+  <g transform="translate(56 40)" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif">
+    <text fill="#8a9099" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="14" letter-spacing="2.4">PI EXTENSION  ·  FORTIOS REST  ·  v1.4.1</text>
+    <text y="92" fill="#f4f1ea" font-size="72" font-weight="700" letter-spacing="-2.6">pi-fgt</text>
+    <text y="142" fill="#c5c9d0" font-size="24" font-weight="480">191 read-only FortiGate tools for the pi agent.</text>
+    <text y="176" fill="#8a9099" font-size="20">Multi-device. Session-gated. Never writes.</text>
+
+    <g transform="translate(0 220)" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="14">
+      <rect width="118" height="36" rx="8" fill="#14181e" stroke="#2a2f38"/>
+      <text x="16" y="23" fill="#3ecf8e">GET only</text>
+      <rect x="130" width="148" height="36" rx="8" fill="#14181e" stroke="#2a2f38"/>
+      <text x="146" y="23" fill="#f4f1ea">no MCP</text>
+      <rect x="290" width="188" height="36" rx="8" fill="#14181e" stroke="#2a2f38"/>
+      <text x="306" y="23" fill="#f4f1ea">opt-in devices</text>
+    </g>
+  </g>
+
+  <!-- right: project-native flow -->
+  <g transform="translate(756 40)" font-family="ui-monospace,SFMono-Regular,Menlo,monospace">
+    <!-- terminal frame -->
+    <rect width="388" height="252" rx="14" fill="#11151b" stroke="#2a2f38"/>
+    <circle cx="22" cy="20" r="5" fill="#3a404a"/>
+    <circle cx="40" cy="20" r="5" fill="#3a404a"/>
+    <circle cx="58" cy="20" r="5" fill="#3a404a"/>
+    <path d="M0 36H388" stroke="#1e2228"/>
+
+    <text x="20" y="64" fill="#5c636e" font-size="13">~/.pi/agent/</text>
+    <text x="20" y="90" fill="#8a9099" font-size="14">fortigate.json</text>
+    <text x="168" y="90" fill="#5c636e" font-size="14">devices exist</text>
+    <text x="20" y="116" fill="#8a9099" font-size="14">fortigate.env</text>
+    <text x="168" y="116" fill="#5c636e" font-size="14">tokens stay out</text>
+
+    <path d="M20 136H368" stroke="#1e2228"/>
+
+    <text x="20" y="164" fill="#3ecf8e" font-size="14">$ /fortigate</text>
+    <text x="20" y="188" fill="#c5c9d0" font-size="14">picker · session only</text>
+    <text x="20" y="212" fill="#5c636e" font-size="13">edge  ✓    dc-core  ·    lab  ·</text>
+
+    <path d="M20 228H368" stroke="#1e2228"/>
+
+    <text x="20" y="248" fill="#f4f1ea" font-size="14">GET  monitor/wifi/client</text>
+    <text x="20" y="272" fill="#3ecf8e" font-size="13">200  ·  filtered  ·  VDOM pinned</text>
+  </g>
+
+  <text x="1144" y="336" text-anchor="end" fill="#5c636e" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="12">@itc-steve/pi-fgt  ·  MIT</text>
+</svg>

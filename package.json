@@ -1,6 +1,6 @@
 {
   "name": "@itc-steve/pi-fgt",
-  "version": "1.4.0",
+  "version": "1.4.1",
   "description": "Pi extension: read-only multi-device FortiGate (FortiOS REST) tools — firewall, VPN, FortiAP, FortiSwitch",
   "keywords": [
     "pi-package",
@@ -30,6 +30,7 @@
   "files": [
     "src",
     "types",
+    "assets",
     "fortigate.json.example",
     "fortigate.env.example",
     "fortigate-filters.example.json",
@@ -38,8 +39,9 @@
   ],
   "scripts": {
     "filters:example": "node --experimental-strip-types scripts/gen-filters-example.ts",
-    "test": "npm run test:filters",
+    "test": "npm run test:filters && npm run test:validate",
     "test:filters": "out=$(mktemp -d) && tsc --noEmit false --outDir \"$out\" && node \"$out/filters/engine.test.js\"; code=$?; rm -rf \"$out\"; exit $code",
+    "test:validate": "out=$(mktemp -d) && tsc --noEmit false --outDir \"$out\" && node \"$out/validate.test.js\"; code=$?; rm -rf \"$out\"; exit $code",
     "typecheck": "tsc --noEmit"
   },
   "pi": {

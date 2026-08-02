@@ -5,7 +5,7 @@ import { Type } from "typebox";
 
 import { deviceParam, textResult } from "./helpers.js";
 import { resolveDevice, getToken, getMaxResponseBytes } from "../config.js";
-import { fortiGet, fortiResults, PATH_HINTS } from "../client.js";
+import { fortiGet, fortiResults, CMDB_HINTS, MONITOR_HINTS } from "../client.js";
 import { bounded } from "../bounds.js";
 import { validatePath } from "../validate.js";
 
@@ -18,6 +18,7 @@ export function registerEscapeTools(pi: ExtensionAPI): void {
 		description:
 			"Read any cmdb object by bare path (GET cmdb/<path>). " +
 			"Examples: firewall/policy, wireless-controller/wtp, switch-controller/managed-switch. " +
+			"Config tables only — live state (wifi/*, network/arp, firewall/sessions, router/ipv4) lives under monitor/: use get_monitor_resource. " +
 			"No api/v2 prefix, no query string. Prefer typed tools (get_fortiaps, get_fortiswitches, …) when available. VDOM-pinned.",
 		promptSnippet: "FortiGate generic cmdb GET",
 		parameters: Type.Object({
@@ -26,13 +27,13 @@ export function registerEscapeTools(pi: ExtensionAPI): void {
 		}),
 		async execute(_id, params, signal) {
 			try {
-				const p = validatePath(params.path);
+				const p = validatePath(params.path, "path", "cmdb");
 				const { name, device: dev } = resolveDevice(params.device);
 				const token = getToken(dev);
 				let data = fortiResults(await fortiGet(`cmdb/${p}`, dev, token, {}, signal));
 				data = bounded(
 					data,
-					"Append an object name/id to the path to fetch a single record. " + PATH_HINTS,
+					"Append an object name/id to the path to fetch a single record. " + CMDB_HINTS,
 					getMaxResponseBytes(),
 				);
 				return textResult(data, { device: name, path: `cmdb/${p}` });
@@ -57,13 +58,13 @@ export function registerEscapeTools(pi: ExtensionAPI): void {
 		}),
 		async execute(_id, params, signal) {
 			try {
-				const p = validatePath(params.path);
+				const p = validatePath(params.path, "path", "monitor");
 				const { name, device: dev } = resolveDevice(params.device);
 				const token = getToken(dev);
 				let data = fortiResults(await fortiGet(`monitor/${p}`, dev, token, {}, signal));
 				data = bounded(
 					data,
-					"Prefer typed tools for paging/filters. " + PATH_HINTS,
+					"Prefer typed tools for paging/filters. " + MONITOR_HINTS,
 					getMaxResponseBytes(),
 				);
 				return textResult(data, { device: name, path: `monitor/${p}` });

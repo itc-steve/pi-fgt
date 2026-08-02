@@ -1,0 +1,31 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="220" viewBox="0 0 1200 220" role="img" aria-labelledby="title desc">
+  <title id="title">pi-fgt safety guarantees</title>
+  <desc id="desc">Six hard boundaries: GET only, write refusal, VDOM pinned, path validation, response caps, tokens via env, session opt-in devices.</desc>
+
+  <rect width="1200" height="220" rx="26" fill="#0a0c0f"/>
+
+  <g font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif">
+    <text x="56" y="44" fill="#8a9099" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="14" letter-spacing="2.2">BOUNDARIES</text>
+    <text x="56" y="80" fill="#f4f1ea" font-size="26" font-weight="650">What the agent is not allowed to do.</text>
+  </g>
+
+  <g font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="15" fill="#c5c9d0">
+    <rect x="56" y="110" width="350" height="40" rx="8" fill="#11151b" stroke="#2a2f38"/>
+    <text x="72" y="136"><tspan fill="#3ecf8e">●</tspan>  GET only — no write paths</text>
+
+    <rect x="424" y="110" width="350" height="40" rx="8" fill="#11151b" stroke="#2a2f38"/>
+    <text x="440" y="136"><tspan fill="#3ecf8e">●</tspan>  attempt_write_operation refuses</text>
+
+    <rect x="792" y="110" width="352" height="40" rx="8" fill="#11151b" stroke="#2a2f38"/>
+    <text x="808" y="136"><tspan fill="#3ecf8e">●</tspan>  VDOM pinned from config</text>
+
+    <rect x="56" y="162" width="350" height="40" rx="8" fill="#11151b" stroke="#2a2f38"/>
+    <text x="72" y="188"><tspan fill="#3ecf8e">●</tspan>  tokens only via env file</text>
+
+    <rect x="424" y="162" width="350" height="40" rx="8" fill="#11151b" stroke="#2a2f38"/>
+    <text x="440" y="188"><tspan fill="#3ecf8e">●</tspan>  path validation on escapes</text>
+
+    <rect x="792" y="162" width="352" height="40" rx="8" fill="#11151b" stroke="#2a2f38"/>
+    <text x="808" y="188"><tspan fill="#3ecf8e">●</tspan>  devices opt-in per session</text>
+  </g>
+</svg>

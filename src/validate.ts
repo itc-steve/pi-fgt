@@ -24,8 +24,15 @@ export function validateName(value: string, label: string): string {
 /**
  * Bare FortiOS path under cmdb/ or monitor/ (no scheme, no api/v2 prefix, no query).
  * Examples: firewall/policy, wifi/managed_ap, switch-controller/managed-switch/status
+ *
+ * `expect` rejects a path whose explicit namespace contradicts the calling tool,
+ * instead of silently stripping it and querying the wrong namespace.
  */
-export function validatePath(value: string, label = "path"): string {
+export function validatePath(
+  value: string,
+  label = "path",
+  expect?: "cmdb" | "monitor",
+): string {
   let p = (value || "").trim().replace(/^\/+|\/+$/g, "");
   if (!p) {
     throw new Error(`${label} is required`);
@@ -33,7 +40,15 @@ export function validatePath(value: string, label = "path"): string {
   // Strip accidental full URL / api prefix the model often adds
   p = p.replace(/^https?:\/\/[^/]+\/?/i, "");
   p = p.replace(/^api\/v2\//i, "");
-  p = p.replace(/^(cmdb|monitor)\//i, ""); // tools add their own prefix
+  // Namespace prefix: tools add their own, but a mismatch is a real error
+  const ns = p.match(/^(cmdb|monitor)\//i)?.[1]?.toLowerCase();
+  if (ns && expect && ns !== expect) {
+    const tool = ns === "monitor" ? "get_monitor_resource" : "get_config_object";
+    throw new Error(
+      `${label} '${p}' is a ${ns}/ path but this tool reads ${expect}/ only — use ${tool} instead.`,
+    );
+  }
+  if (ns) p = p.slice(ns.length + 1);
   p = p.replace(/^\/+|\/+$/g, "");
 
   if (!p) {
