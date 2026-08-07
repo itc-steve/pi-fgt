@@ -7,6 +7,29 @@ export interface DeviceConfig {
   verifySsl?: boolean;
 }
 
+/** Fields accepted when creating/editing a device (token never stored in DeviceConfig). */
+export interface DeviceInput {
+  url: string;
+  vdom?: string;
+  verifySsl?: boolean;
+  /**
+   * Edit only: change key only if it matches ^FORTIGATE_[A-Z0-9_]+_TOKEN$.
+   * Add always auto-generates; legacy weak keys kept when already in JSON.
+   */
+  tokenEnv?: string;
+  /** Optional token to store (session memory or fortigate.env). Never written to JSON. */
+  token?: string;
+}
+
+/** Where the device record lives. */
+export type DeviceStorage = "session" | "persistent";
+
+/**
+ * Which source would supply the token right now (never the value).
+ * Resolution order: session → process.env → fortigate.env.
+ */
+export type CredentialSource = "session" | "process" | "env-file" | "none";
+
 /** Session start default for FortiGate tools. "off" = must /fortigate on each new session. */
 export type SessionDefault = "on" | "off";
 
