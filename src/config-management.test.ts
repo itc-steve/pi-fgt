@@ -6,10 +6,12 @@
 import assert from "node:assert/strict";
 import {
   chmodSync,
+  mkdirSync,
   mkdtempSync,
   readFileSync,
   rmSync,
   statSync,
+  unlinkSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -92,12 +94,13 @@ function check(name: string, fn: () => void): void {
 check("normalizeDeviceUrl defaults https + 443", () => {
   assert.equal(normalizeDeviceUrl("fw.example.com"), "https://fw.example.com:443");
   assert.equal(normalizeDeviceUrl("https://fw.example.com"), "https://fw.example.com:443");
-  assert.equal(normalizeDeviceUrl("http://fw.example.com:8080"), "http://fw.example.com:8080");
 });
 
-check("normalizeDeviceUrl rejects empty / bad scheme", () => {
+check("normalizeDeviceUrl rejects empty / non-https schemes", () => {
   assert.throws(() => normalizeDeviceUrl(""), /url/i);
-  assert.throws(() => normalizeDeviceUrl("ftp://x"), /http/i);
+  assert.throws(() => normalizeDeviceUrl("ftp://x"), /https/i);
+  assert.throws(() => normalizeDeviceUrl("http://fw.example.com:8080"), /https/i);
+  assert.throws(() => normalizeDeviceUrl("http://fw.example.com"), /https|bearer|http/i);
 });
 
 check("normalizeDeviceUrl host:port, IPv4, IPv6", () => {
@@ -301,6 +304,128 @@ check("setPersistentToken replaces env value, rejects CR/LF/NUL", () => {
   assert.throws(() => setPersistentToken("edge", "bad\rtok"), /CR|LF|NUL|inject/i);
 });
 
+check("setPersistentToken clears same-name session override", () => {
+  addPersistentDevice("edge", { url: "https://e.example:443", token: "file-old" });
+  setSessionToken("edge", "session-old");
+  assert.equal(credentialSource("edge"), "session");
+  assert.equal(getToken(loadConfig().devices.edge), "session-old");
+  setPersistentToken("edge", "file-new");
+  assert.equal(credentialSource("edge"), "env-file");
+  assert.equal(getToken(loadConfig().devices.edge), "file-new");
+});
+
+check("tokenEnv generation collides with env-file and process.env keys", () => {
+  // unreferenced env-file key blocks FORTIGATE_EDGE_TOKEN
+  writeFileSync(join(root, "fortigate.env"), "# keep\nFORTIGATE_EDGE_TOKEN=orphan\n", {
+    mode: 0o600,
+  });
+  loadConfig(true);
+  const d1 = addPersistentDevice("edge", { url: "https://e.example:443", token: "t1" });
+  assert.equal(d1.tokenEnv, "FORTIGATE_EDGE_2_TOKEN");
+  assert.match(d1.tokenEnv, STRICT_TOKEN_ENV);
+  const env1 = parseEnvFile(readFileSync(join(root, "fortigate.env"), "utf-8"));
+  assert.equal(env1.FORTIGATE_EDGE_TOKEN, "orphan", "must not overwrite orphan env key");
+  assert.equal(env1.FORTIGATE_EDGE_2_TOKEN, "t1");
+
+  // process.env blocks next free name
+  wipe();
+  process.env.FORTIGATE_EDGE_TOKEN = "from-process";
+  process.env.FORTIGATE_EDGE_2_TOKEN = "also-process";
+  try {
+    const d2 = addPersistentDevice("edge", { url: "https://e.example:443", token: "t2" });
+    assert.equal(d2.tokenEnv, "FORTIGATE_EDGE_3_TOKEN");
+    assert.match(d2.tokenEnv, STRICT_TOKEN_ENV);
+  } finally {
+    delete process.env.FORTIGATE_EDGE_TOKEN;
+    delete process.env.FORTIGATE_EDGE_2_TOKEN;
+  }
+});
+
+/** Force second-step env write to fail: fortigate.env path is a directory. */
+function breakEnvPathAsDir(): void {
+  const p = join(root, "fortigate.env");
+  try {
+    unlinkSync(p);
+  } catch {
+    rmSync(p, { recursive: true, force: true });
+  }
+  mkdirSync(p);
+}
+
+function fixEnvPathAfterBreak(): void {
+  const p = join(root, "fortigate.env");
+  rmSync(p, { recursive: true, force: true });
+  writeFileSync(p, "# keep me\nOTHER=stay\n", { mode: 0o600 });
+}
+
+check("add with token rolls back JSON if env write fails", () => {
+  const before = snapshotFiles();
+  breakEnvPathAsDir();
+  try {
+    assert.throws(
+      () => addPersistentDevice("edge", { url: "https://e.example:443", token: "secret" }),
+      /EISDIR|ENOTDIR|EPERM|EACCES|EISDIR|directory|ENOTDIR|EINVAL|EEXIST|ENOENT/i,
+    );
+  } finally {
+    fixEnvPathAfterBreak();
+  }
+  assert.equal(loadConfig(true).devices.edge, undefined);
+  assert.deepEqual(Object.keys(loadConfig().devices), []);
+  // json restored to pre-add content
+  assert.equal(
+    JSON.stringify(JSON.parse(readFileSync(join(root, "fortigate.json"), "utf-8")).devices),
+    JSON.stringify(JSON.parse(before.json).devices),
+  );
+});
+
+check("edit with token rolls back JSON if env write fails", () => {
+  addPersistentDevice("edge", { url: "https://e.example:443", token: "old" });
+  const before = snapshotFiles();
+  const beforeUrl = loadConfig(true).devices.edge.url;
+  breakEnvPathAsDir();
+  try {
+    assert.throws(
+      () =>
+        editPersistentDevice("edge", {
+          url: "https://other.example:8443",
+          token: "new-secret",
+        }),
+      /EISDIR|ENOTDIR|EPERM|EACCES|directory|EINVAL|EEXIST|ENOENT/i,
+    );
+  } finally {
+    fixEnvPathAfterBreak();
+    // restore env content from before (fixEnvPathAfterBreak wiped secrets)
+    writeFileSync(join(root, "fortigate.env"), before.env, { mode: 0o600 });
+    loadConfig(true);
+  }
+  // After rollback, json should still be pre-edit; re-load after we restored env for getToken
+  // Re-apply: the function should have restored json before throw — check device url
+  // Note: finally rewrote env; json must still show original url from successful rollback
+  const cfg = loadConfig(true);
+  assert.equal(cfg.devices.edge.url, beforeUrl);
+  assert.notEqual(cfg.devices.edge.url, "https://other.example:8443");
+  assert.equal(getToken(cfg.devices.edge), "old");
+});
+
+check("remove with removeEnvKey rolls back JSON if env delete fails", () => {
+  addPersistentDevice("edge", { url: "https://e.example:443", token: "tok" });
+  const key = loadConfig(true).devices.edge.tokenEnv;
+  const before = snapshotFiles();
+  breakEnvPathAsDir();
+  try {
+    assert.throws(
+      () => removePersistentDevice("edge", { removeEnvKey: true }),
+      /EISDIR|ENOTDIR|EPERM|EACCES|directory|EINVAL|EEXIST|ENOENT/i,
+    );
+  } finally {
+    fixEnvPathAfterBreak();
+    writeFileSync(join(root, "fortigate.env"), before.env, { mode: 0o600 });
+  }
+  const cfg = loadConfig(true);
+  assert.ok(cfg.devices.edge, "device restored after failed env delete");
+  assert.equal(cfg.devices.edge.tokenEnv, key);
+});
+
 // #4 duplicate add rejected
 check("addPersistentDevice rejects duplicate name (no json/env change)", () => {
   addPersistentDevice("edge", { url: "https://e.example:443", token: "first" });
@@ -420,7 +545,7 @@ check("listAllDevices still works for picker (session+persistent)", () => {
   assert.equal(typeof edge.vdom, "string");
 });
 
-check("manual fortigate.json still loads (compat)", () => {
+check("manual fortigate.json still loads (compat, incl. legacy http URL)", () => {
   writeFileSync(
     join(root, "fortigate.json"),
     JSON.stringify(
@@ -434,18 +559,53 @@ check("manual fortigate.json still loads (compat)", () => {
             vdom: "root",
             verifySsl: false,
           },
+          legacy: {
+            url: "http://old.example.com:80",
+            tokenEnv: "LEGACY_HTTP_TOKEN",
+            vdom: "root",
+            verifySsl: false,
+          },
         },
       },
       null,
       2,
     ),
   );
-  writeFileSync(join(root, "fortigate.env"), "FORTIGATE_EDGE_TOKEN=manual\n", { mode: 0o600 });
+  writeFileSync(
+    join(root, "fortigate.env"),
+    "FORTIGATE_EDGE_TOKEN=manual\nLEGACY_HTTP_TOKEN=legacy\n",
+    { mode: 0o600 },
+  );
   const cfg = loadConfig(true);
   assert.equal(cfg.maxResponseBytes, 12000);
   assert.equal(cfg.devices.edge.verifySsl, false);
   assert.equal(getToken(cfg.devices.edge), "manual");
   assert.equal(credentialSource("edge"), "env-file");
+  // load path does not re-normalize — legacy http stays as stored
+  assert.equal(cfg.devices.legacy.url, "http://old.example.com:80");
+  assert.equal(getToken(cfg.devices.legacy), "legacy");
+});
+
+check("session token does not cross devices with identical URL/tokenEnv", () => {
+  writeFileSync(
+    join(root, "fortigate.json"),
+    JSON.stringify({
+      sessionDefault: "off",
+      maxResponseBytes: 24000,
+      devices: {
+        a: { url: "https://same.example:443", tokenEnv: "SHARED_TOK", vdom: "root", verifySsl: true },
+        b: { url: "https://same.example:443", tokenEnv: "SHARED_TOK", vdom: "root", verifySsl: true },
+      },
+    }, null, 2),
+  );
+  writeFileSync(join(root, "fortigate.env"), "SHARED_TOK=file-shared\n", { mode: 0o600 });
+  const cfg = loadConfig(true);
+  setSessionToken("a", "only-for-a");
+  assert.equal(getToken(cfg.devices.a), "only-for-a");
+  assert.equal(getToken(cfg.devices.b), "file-shared", "b must not inherit a's session token");
+  // structural copy must not pick up session token either
+  const copy = { ...cfg.devices.a };
+  assert.equal(getToken(copy), "file-shared");
 });
 
 // #7 corrupt config diagnostics

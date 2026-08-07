@@ -5,6 +5,49 @@ import { relocationMessage } from "./version.js";
 
 const DEFAULT_TIMEOUT_MS = 30_000;
 
+/** Known Node/OpenSSL certificate failure codes (often on err.cause under Undici). */
+const TLS_CERT_CODES = new Set([
+  "DEPTH_ZERO_SELF_SIGNED_CERT",
+  "SELF_SIGNED_CERT_IN_CHAIN",
+  "UNABLE_TO_VERIFY_LEAF_SIGNATURE",
+  "CERT_HAS_EXPIRED",
+  "CERT_NOT_YET_VALID",
+  "ERR_TLS_CERT_ALTNAME_INVALID",
+  "ERR_SSL_WRONG_VERSION_NUMBER",
+  "UNABLE_TO_GET_ISSUER_CERT",
+  "UNABLE_TO_GET_ISSUER_CERT_LOCALLY",
+  "CERT_UNTRUSTED",
+  "HOSTNAME_MISMATCH",
+]);
+
+/**
+ * True if error or any nested `.cause` looks like a TLS/certificate failure.
+ * Undici often surfaces `TypeError: fetch failed` with cert detail only on `cause.code`.
+ */
+export function isTlsFailure(err: unknown): boolean {
+  let cur: any = err;
+  const seen = new Set<any>();
+  while (cur && typeof cur === "object" && !seen.has(cur)) {
+    seen.add(cur);
+    const code = cur.code != null ? String(cur.code) : "";
+    if (code && TLS_CERT_CODES.has(code)) return true;
+    const msg = String(cur.message ?? cur.reason ?? "");
+    if (
+      /TLS|SSL|certificate|self[-\s]?signed|UNABLE_TO_VERIFY|DEPTH_ZERO|CERT_|hostname\/IP does not match/i.test(
+        msg,
+      )
+    ) {
+      return true;
+    }
+    // Also scan stringified cause fragments without assuming shape
+    if (code && /CERT|TLS|SSL|UNABLE_TO_VERIFY|DEPTH_ZERO/i.test(code)) return true;
+    cur = cur.cause;
+  }
+  // Bare string errors
+  if (typeof err === "string" && /TLS|certificate|SSL|self[-\s]?signed/i.test(err)) return true;
+  return false;
+}
+
 /** Reuse TLS agents per verifySsl setting (avoid new Agent per request). */
 const agentCache = new Map<boolean, Agent>();
 
@@ -144,7 +187,8 @@ export async function fortiGet(
     if (e.name === "AbortError" || (typeof DOMException !== "undefined" && e instanceof DOMException && e.name === "AbortError")) {
       throw e;
     }
-    if (/certificate|tls|verify/i.test(String(e))) {
+    // Walk cause chain — Undici "fetch failed" + DEPTH_ZERO_SELF_SIGNED_CERT etc.
+    if (isTlsFailure(e)) {
       throw new Error("TLS verification failed. Set verifySsl:false for self-signed in config.");
     }
     throw new Error(`Network error contacting FortiGate: ${e.message || e}`);

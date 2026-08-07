@@ -12,6 +12,13 @@ import { loadConfig, listDevices, resetSessionVisibility } from "./config.js";
 import { showDevicePicker } from "./device-picker.js";
 import { loadFilters, filtersPath, filtersLoadError } from "./filters/index.js";
 import { withFilterContext } from "./filters/wrap.js";
+import {
+	formatDeviceStatusLines,
+	runAddWizard,
+	runEditWizard,
+	runRemoveWizard,
+	runTokenWizard,
+} from "./setup-wizard.js";
 import { FORTIGATE_TOOL_NAMES, FORTIGATE_TOOL_NAME_SET } from "./tool-names.js";
 import { registerSystemTools } from "./tools/system.js";
 import { registerNetworkTools } from "./tools/network.js";
@@ -165,11 +172,43 @@ export default function (pi: ExtensionAPI): void {
 			const cfg = loadConfig();
 			const selected = listDevices().map((d) => d.name);
 			const total = Object.keys(cfg.devices || {}).length;
+			const detail = formatDeviceStatusLines().join("\n");
 			ctx.ui.notify(
-				`FortiGate tools: ${currentlyOn ? "ON" : "OFF"} | AI can see ${selected.length}/${total}: [${selected.join(", ") || "none"}]`,
+				[
+					`FortiGate tools: ${currentlyOn ? "ON" : "OFF"} | AI can see ${selected.length}/${total}: [${selected.join(", ") || "none"}]`,
+					detail,
+				].join("\n"),
 				"info",
 			);
 			enabledThisSession = currentlyOn;
+			updateStatus(ctx);
+			return;
+		}
+
+		if (cmd === "add" || cmd === "a") {
+			const result = await runAddWizard(ctx);
+			if (result.ok) {
+				// Successful add selects the device; enable tools so AI can use it.
+				setFortiGateEnabled(pi, true);
+			}
+			updateStatus(ctx);
+			return;
+		}
+
+		if (cmd === "token" || cmd === "tok") {
+			await runTokenWizard(ctx);
+			updateStatus(ctx);
+			return;
+		}
+
+		if (cmd === "edit" || cmd === "e") {
+			await runEditWizard(ctx);
+			updateStatus(ctx);
+			return;
+		}
+
+		if (cmd === "remove" || cmd === "rm" || cmd === "del" || cmd === "delete") {
+			await runRemoveWizard(ctx);
 			updateStatus(ctx);
 			return;
 		}
@@ -201,7 +240,7 @@ export default function (pi: ExtensionAPI): void {
 			setFortiGateEnabled(pi, false);
 			resetSessionVisibility();
 			updateStatus(ctx);
-			ctx.ui.notify("FortiGate tools OFF, device selection cleared", "info");
+			ctx.ui.notify("FortiGate tools OFF, temporary state cleared", "info");
 			return;
 		}
 
@@ -210,7 +249,7 @@ export default function (pi: ExtensionAPI): void {
 				setFortiGateEnabled(pi, false);
 				resetSessionVisibility();
 				updateStatus(ctx);
-				ctx.ui.notify("FortiGate tools OFF, device selection cleared", "info");
+				ctx.ui.notify("FortiGate tools OFF, temporary state cleared", "info");
 			} else {
 				await enableAndPick(ctx);
 			}
@@ -218,18 +257,22 @@ export default function (pi: ExtensionAPI): void {
 		}
 
 		ctx.ui.notify(
-			"Usage: /fortigate [on|off|toggle|status|filters]  — /fortigate opens the device picker. Devices are hidden from the AI until you select them, every session, never saved.",
+			"Usage: /fortigate [on|off|toggle|status|filters|add|token|edit|remove]  — /fortigate opens the device picker. Devices are hidden from the AI until you select them, every session, never saved.",
 			"warn",
 		);
 	};
 
 	const SUBCOMMANDS: Array<{ value: string; description: string }> = [
 		{ value: "on", description: "Enable FortiGate tools + pick devices for this session" },
-		{ value: "off", description: "Disable FortiGate tools and clear device selection" },
+		{ value: "off", description: "Disable FortiGate tools and clear temporary state" },
 		{ value: "toggle", description: "Flip FortiGate tools on (with picker) / off" },
-		{ value: "status", description: "Show on/off + which devices the AI can see" },
+		{ value: "status", description: "Show on/off, storage, and credential source (never values)" },
 		{ value: "devices", description: "Open the device picker (same as /fortigate)" },
 		{ value: "filters", description: "Show which response fields are being excluded, and from where" },
+		{ value: "add", description: "Add device (session or persistent) via setup wizard" },
+		{ value: "token", description: "Set session/persistent token or clear temporary token" },
+		{ value: "edit", description: "Edit device settings in its current storage (no token)" },
+		{ value: "remove", description: "Remove a device (optional unused env-key delete)" },
 	];
 
 	const getArgumentCompletions = (prefix: string) => {
@@ -244,7 +287,7 @@ export default function (pi: ExtensionAPI): void {
 
 	pi.registerCommand("fortigate", {
 		description:
-			"FortiGate tools + device picker: /fortigate [on|off|toggle|status]",
+			"FortiGate tools + config: /fortigate [on|off|toggle|status|add|token|edit|remove]",
 		getArgumentCompletions,
 		handler: handleCommand as any,
 	});

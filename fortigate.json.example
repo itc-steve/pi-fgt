@@ -6,7 +6,7 @@
       "url": "https://fw01.example.com:443",
       "tokenEnv": "FORTIGATE_EDGE_TOKEN",
       "vdom": "root",
-      "verifySsl": false
+      "verifySsl": true
     }
   }
 }

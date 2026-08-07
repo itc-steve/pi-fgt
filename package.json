@@ -39,10 +39,11 @@
   ],
   "scripts": {
     "filters:example": "node --experimental-strip-types scripts/gen-filters-example.ts",
-    "test": "npm run test:filters && npm run test:validate && npm run test:config",
+    "test": "npm run test:filters && npm run test:validate && npm run test:config && npm run test:wizard",
     "test:filters": "out=$(mktemp -d) && tsc --noEmit false --outDir \"$out\" && node \"$out/filters/engine.test.js\"; code=$?; rm -rf \"$out\"; exit $code",
     "test:validate": "out=$(mktemp -d) && tsc --noEmit false --outDir \"$out\" && node \"$out/validate.test.js\"; code=$?; rm -rf \"$out\"; exit $code",
     "test:config": "out=$(mktemp -d) && tsc --noEmit false --outDir \"$out\" && node \"$out/config-management.test.js\"; code=$?; rm -rf \"$out\"; exit $code",
+    "test:wizard": "out=$(mktemp -d) && tsc --noEmit false --outDir \"$out\" && NODE_PATH=\"$PWD/node_modules\" node \"$out/setup-wizard.test.js\"; code=$?; rm -rf \"$out\"; exit $code",
     "typecheck": "tsc --noEmit"
   },
   "pi": {

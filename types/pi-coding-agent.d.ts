@@ -20,10 +20,21 @@ declare module "@earendil-works/pi-coding-agent" {
 	}
 
 	export interface UI {
-		notify(message: string, type?: "info" | "warn" | "error" | "success"): void;
-		setStatus(key: string, status: string): void;
-		select<T extends string>(label: string, options: T[]): Promise<T | undefined>;
-		select<T extends UISelectOption>(label: string, options: T[]): Promise<T | undefined>;
+		notify(
+			message: string,
+			type?: "info" | "warn" | "warning" | "error" | "success",
+		): void;
+		setStatus(key: string, status: string | undefined): void;
+		select(title: string, options: string[]): Promise<string | undefined>;
+		select<T extends UISelectOption>(
+			label: string,
+			options: T[],
+		): Promise<T | undefined>;
+		confirm(title: string, message: string): Promise<boolean>;
+		input(
+			title: string,
+			placeholder?: string,
+		): Promise<string | undefined>;
 		input(label: string, options?: UIInputOptions): Promise<string | undefined>;
 		custom<T>(
 			fn: (
@@ -35,9 +46,12 @@ declare module "@earendil-works/pi-coding-agent" {
 		): Promise<T>;
 	}
 
+	export type ExtensionMode = "tui" | "rpc" | "json" | "print";
+
 	export interface ExtensionContext {
 		cwd: string;
 		hasUI: boolean;
+		mode?: ExtensionMode;
 		ui: UI;
 	}
 
@@ -107,6 +121,29 @@ declare module "@earendil-works/pi-tui" {
 	export class Text {
 		constructor(text: string, paddingLeft?: number, paddingTop?: number);
 	}
+
+	/** Single-line input with Kitty printable + bracketed paste support. */
+	export class Input {
+		onSubmit?: (value: string) => void;
+		onEscape?: () => void;
+		focused: boolean;
+		getValue(): string;
+		setValue(value: string): void;
+		handleInput(data: string): void;
+		invalidate(): void;
+		render(width: number): string[];
+	}
+
+	/** Visible terminal columns (ANSI/OSC stripped, wide chars counted). */
+	export function visibleWidth(str: string): number;
+
+	/** ANSI-aware truncate to max visible width (maxWidth<=0 → ""). */
+	export function truncateToWidth(
+		text: string,
+		maxWidth: number,
+		ellipsis?: string,
+		pad?: boolean,
+	): string;
 
 	export class SettingsList {
 		constructor(

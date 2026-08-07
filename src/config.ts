@@ -10,10 +10,12 @@ import {
   mkdirSync,
   readFileSync,
   renameSync,
+  rmSync,
+  statSync,
   unlinkSync,
   writeFileSync,
 } from "node:fs";
-import { dirname, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { randomBytes } from "node:crypto";
 import type {
   CredentialSource,
@@ -153,9 +155,13 @@ function assertSafeToken(token: string): void {
 /** Atomic write: temp in same dir → rename. Optional mode (env uses 0600). */
 function atomicWrite(path: string, content: string, mode?: number): void {
   mkdirSync(dirname(path), { recursive: true });
+  // If path is a directory (test fault / corruption), refuse — caller rollback handles restore.
+  if (existsSync(path) && statSync(path).isDirectory()) {
+    throw new Error(`EISDIR: ${path} is a directory`);
+  }
   const tmp = join(
     dirname(path),
-    `.${path.split("/").pop()}.${process.pid}.${randomBytes(4).toString("hex")}.tmp`,
+    `.${basename(path)}.${process.pid}.${randomBytes(4).toString("hex")}.tmp`,
   );
   try {
     writeFileSync(tmp, content, { encoding: "utf-8", mode: mode ?? 0o644 });
@@ -173,6 +179,58 @@ function atomicWrite(path: string, content: string, mode?: number): void {
       unlinkSync(tmp);
     } catch {
       /* ignore */
+    }
+    throw e;
+  }
+}
+
+/** In-memory snapshot of config files (no on-disk secret backups). */
+type FileSnap = { json: string | null; env: string | null };
+
+function snapshotConfigFiles(): FileSnap {
+  const jp = configFile();
+  const ep = envFile();
+  return {
+    json: existsSync(jp) && statSync(jp).isFile() ? readFileSync(jp, "utf-8") : null,
+    env: existsSync(ep) && statSync(ep).isFile() ? readFileSync(ep, "utf-8") : null,
+  };
+}
+
+function restoreConfigFiles(snap: FileSnap): void {
+  const jp = configFile();
+  const ep = envFile();
+  try {
+    if (snap.json === null) {
+      if (existsSync(jp) && statSync(jp).isFile()) unlinkSync(jp);
+    } else {
+      if (existsSync(jp) && statSync(jp).isDirectory()) rmSync(jp, { recursive: true, force: true });
+      atomicWrite(jp, snap.json);
+    }
+    if (snap.env === null) {
+      if (existsSync(ep) && statSync(ep).isFile()) unlinkSync(ep);
+      else if (existsSync(ep) && statSync(ep).isDirectory()) rmSync(ep, { recursive: true, force: true });
+    } else {
+      if (existsSync(ep) && statSync(ep).isDirectory()) rmSync(ep, { recursive: true, force: true });
+      atomicWrite(ep, snap.env, 0o600);
+    }
+  } finally {
+    cached = null;
+    cacheTime = 0;
+    envFileCache = null;
+    envFileCacheTime = 0;
+  }
+}
+
+/** Run JSON+env mutation with in-memory rollback if the second step fails. */
+function withConfigFileRollback(mutate: () => void): void {
+  const snap = snapshotConfigFiles();
+  try {
+    mutate();
+  } catch (e) {
+    try {
+      restoreConfigFiles(snap);
+    } catch {
+      /* still rethrow original */
     }
     throw e;
   }
@@ -238,27 +296,27 @@ function deleteEnvKey(key: string): void {
 // URL / defaults / tokenEnv names
 // ---------------------------------------------------------------------------
 
-/** Default HTTPS + port 443 when omitted. Strips path. */
+/** Default HTTPS + port 443 when omitted. Explicit http:// rejected (bearer must be HTTPS). */
 export function normalizeDeviceUrl(raw: string): string {
   let s = (raw ?? "").trim();
   if (!s) throw new Error("url required");
-  // Reject only explicit scheme:// (not host:port like fw.example.com:8443)
-  if (/^[a-z][a-z0-9+.-]*:\/\//i.test(s) && !/^https?:\/\//i.test(s)) {
-    throw new Error("url must be http or https");
+  // Reject non-https schemes with explicit scheme:// (not host:port like fw.example.com:8443)
+  if (/^[a-z][a-z0-9+.-]*:\/\//i.test(s) && !/^https:\/\//i.test(s)) {
+    throw new Error("url must be https (bearer token transport rejects http://)");
   }
-  if (!/^https?:\/\//i.test(s)) s = `https://${s}`;
+  if (!/^https:\/\//i.test(s)) s = `https://${s}`;
   let u: URL;
   try {
     u = new URL(s);
   } catch {
     throw new Error(`invalid url: ${raw}`);
   }
-  if (u.protocol !== "http:" && u.protocol !== "https:") {
-    throw new Error("url must be http or https");
+  if (u.protocol !== "https:") {
+    throw new Error("url must be https (bearer token transport rejects http://)");
   }
   if (!u.hostname) throw new Error("url missing hostname");
-  const port = u.port || (u.protocol === "https:" ? "443" : "80");
-  return `${u.protocol}//${u.hostname}:${port}`;
+  const port = u.port || "443";
+  return `https://${u.hostname}:${port}`;
 }
 
 function applyDefaults(dev: Partial<DeviceConfig>): DeviceConfig {
@@ -293,6 +351,22 @@ export function generateTokenEnvName(
   let i = 2;
   while (used.has(`FORTIGATE_${part}_${i}_TOKEN`)) i++;
   return `FORTIGATE_${part}_${i}_TOKEN`;
+}
+
+/**
+ * Union of configured device tokenEnv names, fortigate.env keys, and process.env
+ * keys that match generated/strict token shape or FORTIGATE_* prefix.
+ */
+export function collectTakenTokenEnvs(
+  devices: Record<string, DeviceConfig>,
+  except?: string,
+): string[] {
+  const used = new Set(takenTokenEnvs(devices, except));
+  for (const k of Object.keys(loadEnvFile(true))) used.add(k);
+  for (const k of Object.keys(process.env)) {
+    if (GENERATED_TOKEN_ENV_RE.test(k) || k.startsWith("FORTIGATE_")) used.add(k);
+  }
+  return [...used];
 }
 
 // ---------------------------------------------------------------------------
@@ -486,19 +560,26 @@ export function addPersistentDevice(name: string, input: DeviceInput): DeviceCon
   if (disk.devices[n]) {
     throw new Error(`Device "${n}" already exists; use editPersistentDevice`);
   }
-  // Always auto-generate — ignore caller tokenEnv on add (legacy keys only via manual JSON).
-  const tokenEnv = generateTokenEnvName(n, takenTokenEnvs(disk.devices));
+  // Always auto-generate — collide with JSON + env-file + process.env names.
+  const tokenEnv = generateTokenEnvName(n, collectTakenTokenEnvs(disk.devices));
   const dev = applyDefaults({
     url,
     tokenEnv,
     vdom: input.vdom,
     verifySsl: input.verifySsl,
   });
-  disk.devices[n] = dev;
-  writeDiskConfig(disk);
-  if (input.token !== undefined) {
-    const t = input.token.trim();
-    if (t) upsertEnvKey(tokenEnv, t);
+  const token =
+    input.token !== undefined && input.token.trim() ? input.token.trim() : undefined;
+
+  if (token) {
+    withConfigFileRollback(() => {
+      disk.devices[n] = dev;
+      writeDiskConfig(disk);
+      upsertEnvKey(tokenEnv, token);
+    });
+  } else {
+    disk.devices[n] = dev;
+    writeDiskConfig(disk);
   }
   return { ...dev };
 }
@@ -537,11 +618,18 @@ export function editPersistentDevice(
     vdom: input.vdom !== undefined ? input.vdom : prev.vdom,
     verifySsl: input.verifySsl !== undefined ? input.verifySsl : prev.verifySsl,
   });
-  disk.devices[n] = dev;
-  writeDiskConfig(disk);
-  if (input.token !== undefined) {
-    const t = input.token.trim();
-    if (t) upsertEnvKey(dev.tokenEnv, t);
+  const token =
+    input.token !== undefined && input.token.trim() ? input.token.trim() : undefined;
+
+  if (token) {
+    withConfigFileRollback(() => {
+      disk.devices[n] = dev;
+      writeDiskConfig(disk);
+      upsertEnvKey(dev.tokenEnv, token);
+    });
+  } else {
+    disk.devices[n] = dev;
+    writeDiskConfig(disk);
   }
   return { ...dev };
 }
@@ -554,6 +642,8 @@ export function setPersistentToken(name: string, token: string): void {
   if (!dev) throw new Error(`Device "${n}" not found in fortigate.json`);
   if (!dev.tokenEnv) throw new Error(`Device "${n}" has no tokenEnv`);
   upsertEnvKey(dev.tokenEnv, token.trim());
+  // Persistent replacement wins — drop same-name session override.
+  clearSessionToken(n);
 }
 
 /**
@@ -569,14 +659,47 @@ export function removePersistentDevice(
   const disk = cloneConfig(loadDiskConfig(true));
   const prev = disk.devices[n];
   if (!prev) throw new Error(`Device "${n}" not found in fortigate.json`);
-  delete disk.devices[n];
-  writeDiskConfig(disk);
-  enabled.delete(n);
-  sessionDevices.delete(n);
-  sessionTokens.delete(n);
-  if (opts?.removeEnvKey && prev.tokenEnv) {
-    const stillUsed = Object.values(disk.devices).some((d) => d.tokenEnv === prev.tokenEnv);
-    if (!stillUsed) deleteEnvKey(prev.tokenEnv);
+
+  const stillUsed =
+    !!prev.tokenEnv &&
+    Object.entries(disk.devices).some(([k, d]) => k !== n && d.tokenEnv === prev.tokenEnv);
+  const deleteEnv = !!(opts?.removeEnvKey && prev.tokenEnv && !stillUsed);
+
+  const sessDev = sessionDevices.get(n);
+  const sessTok = sessionTokens.get(n);
+  const wasEnabled = enabled.has(n);
+
+  const applyMemoryClear = () => {
+    enabled.delete(n);
+    sessionDevices.delete(n);
+    sessionTokens.delete(n);
+  };
+  const restoreMemory = () => {
+    if (sessDev) sessionDevices.set(n, sessDev);
+    if (sessTok !== undefined) sessionTokens.set(n, sessTok);
+    if (wasEnabled) enabled.add(n);
+  };
+
+  if (deleteEnv) {
+    const snap = snapshotConfigFiles();
+    try {
+      delete disk.devices[n];
+      writeDiskConfig(disk);
+      applyMemoryClear();
+      deleteEnvKey(prev.tokenEnv);
+    } catch (e) {
+      try {
+        restoreConfigFiles(snap);
+      } catch {
+        /* still rethrow */
+      }
+      restoreMemory();
+      throw e;
+    }
+  } else {
+    delete disk.devices[n];
+    writeDiskConfig(disk);
+    applyMemoryClear();
   }
 }
 
@@ -591,6 +714,7 @@ export function deviceStorage(name: string): DeviceStorage | undefined {
   return undefined;
 }
 
+/** Resolve name only by object identity — never by URL/tokenEnv shape (session tokens must not cross devices). */
 function findDeviceName(device: DeviceConfig): string | undefined {
   for (const [n, d] of sessionDevices) {
     if (d === device) return n;
@@ -598,13 +722,6 @@ function findDeviceName(device: DeviceConfig): string | undefined {
   const cfg = loadConfig();
   for (const [n, d] of Object.entries(cfg.devices)) {
     if (d === device) return n;
-  }
-  // structural fallback (copies)
-  for (const [n, d] of sessionDevices) {
-    if (d.url === device.url && d.tokenEnv === device.tokenEnv) return n;
-  }
-  for (const [n, d] of Object.entries(cfg.devices)) {
-    if (d.url === device.url && d.tokenEnv === device.tokenEnv) return n;
   }
   return undefined;
 }
