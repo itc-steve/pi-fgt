@@ -1,6 +1,6 @@
 {
   "name": "@itc-steve/pi-fgt",
-  "version": "1.4.1",
+  "version": "1.4.2",
   "description": "Pi extension: read-only multi-device FortiGate (FortiOS REST) tools — firewall, VPN, FortiAP, FortiSwitch",
   "keywords": [
     "pi-package",
@@ -65,7 +65,7 @@
   },
   "dependencies": {
     "typebox": "^1.3.6",
-    "undici": "^8.7.0"
+    "undici": "^8.10.0"
   },
   "devDependencies": {
     "@types/node": "^22.20.1",
