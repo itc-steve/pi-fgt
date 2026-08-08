@@ -7,7 +7,7 @@
 
   <!-- left: identity -->
   <g transform="translate(56 40)" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif">
-    <text fill="#8a9099" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="14" letter-spacing="2.4">PI EXTENSION  ·  FORTIOS REST  ·  v1.4.1</text>
+    <text fill="#8a9099" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="14" letter-spacing="2.4">PI EXTENSION  ·  FORTIOS REST</text>
     <text y="92" fill="#f4f1ea" font-size="72" font-weight="700" letter-spacing="-2.6">pi-fgt</text>
     <text y="142" fill="#c5c9d0" font-size="24" font-weight="480">191 read-only FortiGate tools for the pi agent.</text>
     <text y="176" fill="#8a9099" font-size="20">Multi-device. Session-gated. Never writes.</text>
@@ -25,7 +25,7 @@
   <!-- right: project-native flow -->
   <g transform="translate(756 40)" font-family="ui-monospace,SFMono-Regular,Menlo,monospace">
     <!-- terminal frame -->
-    <rect width="388" height="252" rx="14" fill="#11151b" stroke="#2a2f38"/>
+    <rect width="388" height="282" rx="14" fill="#11151b" stroke="#2a2f38"/>
     <circle cx="22" cy="20" r="5" fill="#3a404a"/>
     <circle cx="40" cy="20" r="5" fill="#3a404a"/>
     <circle cx="58" cy="20" r="5" fill="#3a404a"/>
@@ -49,5 +49,5 @@
     <text x="20" y="272" fill="#3ecf8e" font-size="13">200  ·  filtered  ·  VDOM pinned</text>
   </g>
 
-  <text x="1144" y="336" text-anchor="end" fill="#5c636e" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="12">@itc-steve/pi-fgt  ·  MIT</text>
+  <text x="1144" y="348" text-anchor="end" fill="#5c636e" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="12">@itc-steve/pi-fgt  ·  MIT</text>
 </svg>
