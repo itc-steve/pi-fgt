@@ -32,7 +32,7 @@ function fortiosNotes(payload: any): string | undefined {
   const v = parseFortiVersion(raw);
   if (!v || !versionAtLeast(v, 7, 6)) return undefined;
 
-  // ponytail: only REMOVED+use entries — those are the confirmed 404→replacement pairs
+  // Only REMOVED entries carrying `use` — the confirmed 404→replacement pairs.
   const moves = Object.entries(ENDPOINT_RELOCATIONS)
     .filter(([, r]) => r.kind === "REMOVED" && r.use)
     .map(([old, r]) => {
@@ -110,7 +110,7 @@ export function registerSystemTools(pi: ExtensionAPI): void {
     promptSnippet: "FortiGate performance counters",
     parameters: Type.Object({ ...deviceParam }),
     async execute(_toolCallId, params, signal, onUpdate, ctx) {
-      // ponytail: do not pass resource= — 7.4.12 returns 400
+      // Do not pass resource= — FortiOS 7.4.12 returns 400 for it.
       return runForti("monitor/system/resource/usage", params, signal, onUpdate, ctx, {
         summarizeResources: true,
         boundHint: "Resource history already reduced to latest sample.",

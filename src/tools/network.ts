@@ -143,7 +143,7 @@ export function registerNetworkTools(pi: ExtensionAPI): void {
       const SESSION_FETCH_MAX = 1000;
       const fetchCount = src || dst ? SESSION_FETCH_MAX : Math.max(20, c);
       const q: Record<string, string | number> = { count: fetchCount, summary: "true" };
-      // ponytail: FortiOS 7.4 ignores srcaddr4/dstaddr4 on this endpoint — filter client-side
+      // FortiOS 7.4 ignores srcaddr4/dstaddr4 on this endpoint — filter client-side.
       const { name, device: dev } = resolveDevice(params.device);
       const token = getToken(dev);
       let data: any = fortiResults(await fortiGet("monitor/firewall/sessions", dev, token, q, signal));

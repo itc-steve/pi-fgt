@@ -250,7 +250,7 @@ export function registerSystemFabricTools(pi: ExtensionAPI): void {
           data = fortiResults(await fortiGet(path, dev, token, {}, signal));
         } catch (e: any) {
           if (e?.name === "AbortError") throw e;
-          // ponytail: 404 on 7.6+ is expected — fall back to replacement endpoint
+          // 404 on FortiOS 7.6+ is expected — fall back to the replacement endpoint.
           if (e?.message?.startsWith("404")) {
             path = "monitor/system/central-management/status";
             data = fortiResults(await fortiGet(path, dev, token, {}, signal));

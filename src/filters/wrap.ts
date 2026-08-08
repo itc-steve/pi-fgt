@@ -2,8 +2,8 @@
  * Wrap pi.registerTool once so every FortiGate tool runs inside an
  * AsyncLocalStorage context carrying its own name + verbose flag.
  *
- * ponytail: proxying the API beats editing 191 execute() bodies, and new
- * tools are covered automatically instead of silently missing per-tool rules.
+ * Proxying the API avoids editing 191 execute() bodies, and new tools are
+ * covered automatically instead of silently missing per-tool rules.
  */
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";

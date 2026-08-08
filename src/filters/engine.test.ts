@@ -1,7 +1,7 @@
 /**
  * Filter engine self-check. Run: npm run test:filters
  * Fixtures are real FortiOS 7.4 payload shapes (FGT70F).
- * ponytail: assert-based, no framework.
+ * Assert-based, no test framework.
  */
 
 import assert from "node:assert/strict";

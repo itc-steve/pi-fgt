@@ -2,7 +2,7 @@
  * validatePath namespace-guard self-check. Run: npm run test:validate
  * Regression: monitor/ paths were silently stripped and queried under cmdb/,
  * yielding FortiOS 400 "no such cmdb table" (see get_config_object bug).
- * ponytail: assert-based, no framework.
+ * Assert-based, no test framework.
  */
 
 import assert from "node:assert/strict";

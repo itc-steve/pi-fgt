@@ -101,7 +101,7 @@ export function relocationMessage(
   return msg;
 }
 
-// ponytail: one assert-based self-check — fails if enrichment regresses
+// Self-check: fails if relocation-message enrichment regresses.
 if (import.meta.main) {
   const msg = relocationMessage("monitor/firewall/session", "7.6.7");
   assert.ok(msg, "known removed path must enrich");

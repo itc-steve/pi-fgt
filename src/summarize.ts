@@ -118,7 +118,7 @@ export function deepTrim(value: unknown, maxItems = 20, depth = 0): unknown {
 	return value;
 }
 
-// ponytail: one runnable check — fails if nested historical leaks through
+// Self-check: fails if nested historical data leaks through.
 if (import.meta.main) {
 	const fake = {
 		results: {

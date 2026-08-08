@@ -79,7 +79,7 @@ function resolveLogSegments(
 }
 
 // Field selection is config-driven (filters tools.get_logs.allowlist).
-// ponytail: kept as a pass-through so callers/signature stay untouched.
+// Kept as a pass-through so callers and the signature stay untouched.
 function projectLogRow(row: any, _verbose: boolean): any {
 	return row;
 }
