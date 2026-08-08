@@ -1,6 +1,6 @@
 /**
  * Config management contract (session + persistent). Run: npm run test:config
- * ponytail: assert-based, no framework. Uses temp agent dir — never real ~/.pi/agent.
+ * Assert-based, no test framework. Uses a temp agent dir — never real ~/.pi/agent.
  */
 
 import assert from "node:assert/strict";
@@ -623,6 +623,54 @@ check("corrupt / non-object JSON errors include config path; no writes", () => {
   assert.throws(() => loadConfig(true), /object|invalid/i);
 
   assert.equal(readFileSync(join(root, "fortigate.env"), "utf-8"), beforeEnv);
+});
+
+check("shared config keeps files group-writable", () => {
+  useConfigDir(root, true);
+  try {
+    addPersistentDevice("edge", {
+      url: "edge.example.com",
+      token: "shared-token",
+    });
+    assert.equal(statSync(join(root, "fortigate.json")).mode & 0o777, 0o664);
+    assert.equal(statSync(join(root, "fortigate.env")).mode & 0o777, 0o660);
+  } finally {
+    useConfigDir(root);
+  }
+});
+
+check("shared config never resolves tokens from private process env", () => {
+  useConfigDir(root, true);
+  process.env.FORTIGATE_EDGE_TOKEN = "private-process-token";
+  try {
+    addPersistentDevice("edge", {
+      url: "edge.example.com",
+      token: "shared-file-token",
+    });
+    const dev = loadConfig(true).devices.edge;
+    assert.equal(credentialSource("edge"), "env-file");
+    assert.equal(getToken(dev), "shared-file-token");
+  } finally {
+    delete process.env.FORTIGATE_EDGE_TOKEN;
+    useConfigDir(root);
+  }
+});
+
+check("shared config rejects tokenEnv outside the FortiGate namespace", () => {
+  useConfigDir(root, true);
+  try {
+    writeFileSync(
+      join(root, "fortigate.json"),
+      JSON.stringify({
+        devices: {
+          edge: { url: "https://attacker.example:443", tokenEnv: "OPENROUTER_API_KEY" },
+        },
+      }),
+    );
+    assert.throws(() => loadConfig(true), /invalid tokenEnv/i);
+  } finally {
+    useConfigDir(root);
+  }
 });
 
 // cleanup

@@ -6,8 +6,10 @@
 
 import {
   chmodSync,
+  closeSync,
   existsSync,
   mkdirSync,
+  openSync,
   readFileSync,
   renameSync,
   rmSync,
@@ -25,13 +27,16 @@ import type {
   FortiConfig,
 } from "./types.js";
 
-const DEFAULT_AGENT_DIR = join(
+const PRIVATE_AGENT_DIR = join(
   process.env.HOME || process.env.USERPROFILE || "~",
   ".pi",
   "agent",
 );
+const SHARED_AGENT_DIR = process.env.PI_FORTIGATE_CONFIG_DIR?.trim();
+const DEFAULT_AGENT_DIR = SHARED_AGENT_DIR || PRIVATE_AGENT_DIR;
 
 let agentDir = DEFAULT_AGENT_DIR;
+let sharedConfig = Boolean(SHARED_AGENT_DIR);
 
 function configFile(): string {
   return join(agentDir, "fortigate.json");
@@ -49,8 +54,9 @@ export function envPath(): string {
 }
 
 /** Test/helper: redirect JSON+env paths. Pass null to restore default. */
-export function useConfigDir(dir: string | null): void {
+export function useConfigDir(dir: string | null, shared?: boolean): void {
   agentDir = dir || DEFAULT_AGENT_DIR;
+  sharedConfig = shared ?? (dir === null && Boolean(SHARED_AGENT_DIR));
   cached = null;
   cacheTime = 0;
   envFileCache = null;
@@ -62,6 +68,50 @@ let cacheTime = 0;
 let envFileCache: Record<string, string> | null = null;
 let envFileCacheTime = 0;
 const TTL_MS = 10_000;
+const LOCK_TIMEOUT_MS = 5_000;
+
+function jsonMode(): number {
+  return sharedConfig ? 0o664 : 0o644;
+}
+
+function envMode(): number {
+  return sharedConfig ? 0o660 : 0o600;
+}
+
+function sleep(ms: number): void {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
+/** Serialize read-modify-write operations across Pi sessions sharing config. */
+function withConfigLock<T>(mutate: () => T): T {
+  mkdirSync(agentDir, { recursive: true });
+  const path = join(agentDir, ".fortigate.lock");
+  const deadline = Date.now() + LOCK_TIMEOUT_MS;
+  let fd: number | undefined;
+
+  while (fd === undefined) {
+    try {
+      fd = openSync(path, "wx", 0o660);
+    } catch (e: any) {
+      if (e?.code !== "EEXIST") throw e;
+      if (Date.now() >= deadline) {
+        throw new Error(`Timed out waiting for config lock: ${path}; restart the service to clear a crashed writer`);
+      }
+      sleep(25);
+    }
+  }
+
+  try {
+    return mutate();
+  } finally {
+    closeSync(fd);
+    try {
+      unlinkSync(path);
+    } catch {
+      /* ignore */
+    }
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Session-local state — IN-MEMORY, NEVER PERSISTED.
@@ -204,14 +254,14 @@ function restoreConfigFiles(snap: FileSnap): void {
       if (existsSync(jp) && statSync(jp).isFile()) unlinkSync(jp);
     } else {
       if (existsSync(jp) && statSync(jp).isDirectory()) rmSync(jp, { recursive: true, force: true });
-      atomicWrite(jp, snap.json);
+      atomicWrite(jp, snap.json, jsonMode());
     }
     if (snap.env === null) {
       if (existsSync(ep) && statSync(ep).isFile()) unlinkSync(ep);
       else if (existsSync(ep) && statSync(ep).isDirectory()) rmSync(ep, { recursive: true, force: true });
     } else {
       if (existsSync(ep) && statSync(ep).isDirectory()) rmSync(ep, { recursive: true, force: true });
-      atomicWrite(ep, snap.env, 0o600);
+      atomicWrite(ep, snap.env, envMode());
     }
   } finally {
     cached = null;
@@ -268,7 +318,7 @@ function upsertEnvKey(key: string, value: string): void {
   }
   let out = next.join("\n");
   if (!out.endsWith("\n")) out += "\n";
-  atomicWrite(envFile(), out, 0o600);
+  atomicWrite(envFile(), out, envMode());
   envFileCache = null;
   envFileCacheTime = 0;
 }
@@ -287,7 +337,7 @@ function deleteEnvKey(key: string): void {
   });
   let out = next.join("\n");
   if (!out.endsWith("\n")) out += "\n";
-  atomicWrite(envFile(), out, 0o600);
+  atomicWrite(envFile(), out, envMode());
   envFileCache = null;
   envFileCacheTime = 0;
 }
@@ -423,6 +473,9 @@ function loadDiskConfig(force = false): FortiConfig {
         if (!dev.url || !dev.tokenEnv) {
           throw new Error(`Device "${name}" missing required url or tokenEnv`);
         }
+        if (sharedConfig && !GENERATED_TOKEN_ENV_RE.test(dev.tokenEnv)) {
+          throw new Error(`Shared device "${name}" has invalid tokenEnv: ${dev.tokenEnv}`);
+        }
         devices[name] = applyDefaults(dev);
       }
     }
@@ -462,7 +515,7 @@ function writeDiskConfig(cfg: FortiConfig): void {
     maxResponseBytes: cfg.maxResponseBytes ?? 24000,
     devices: cfg.devices,
   };
-  atomicWrite(configFile(), `${JSON.stringify(payload, null, 2)}\n`);
+  atomicWrite(configFile(), `${JSON.stringify(payload, null, 2)}\n`, jsonMode());
   // publish only after rename succeeds
   cached = cloneConfig({
     sessionDefault: payload.sessionDefault,
@@ -473,7 +526,7 @@ function writeDiskConfig(cfg: FortiConfig): void {
 }
 
 /** Merge disk + session devices (session shadows same name). */
-export function loadConfig(force = false): FortiConfig {
+function loadConfigUnlocked(force = false): FortiConfig {
   const base = loadDiskConfig(force);
   if (sessionDevices.size === 0) return base;
   const devices = { ...base.devices };
@@ -484,6 +537,12 @@ export function loadConfig(force = false): FortiConfig {
     ...base,
     devices,
   };
+}
+
+export function loadConfig(force = false): FortiConfig {
+  return sharedConfig
+    ? withConfigLock(() => loadConfigUnlocked(force))
+    : loadConfigUnlocked(force);
 }
 
 // ---------------------------------------------------------------------------
@@ -551,7 +610,7 @@ function assertDeviceName(name: string): string {
 }
 
 /** Add a new persistent device. Always auto-generates tokenEnv. Token → fortigate.env only. */
-export function addPersistentDevice(name: string, input: DeviceInput): DeviceConfig {
+function addPersistentDeviceUnlocked(name: string, input: DeviceInput): DeviceConfig {
   const n = assertDeviceName(name);
   if (input.token !== undefined) assertSafeToken(input.token);
   const url = normalizeDeviceUrl(input.url);
@@ -584,12 +643,16 @@ export function addPersistentDevice(name: string, input: DeviceInput): DeviceCon
   return { ...dev };
 }
 
+export function addPersistentDevice(name: string, input: DeviceInput): DeviceConfig {
+  return withConfigLock(() => addPersistentDeviceUnlocked(name, input));
+}
+
 /**
  * Edit fields of an existing persistent device.
  * Preserves tokenEnv by default (including legacy weak keys already in config).
  * A changed tokenEnv is accepted only when it matches GENERATED_TOKEN_ENV_RE.
  */
-export function editPersistentDevice(
+function editPersistentDeviceUnlocked(
   name: string,
   input: Partial<DeviceInput>,
 ): DeviceConfig {
@@ -634,7 +697,14 @@ export function editPersistentDevice(
   return { ...dev };
 }
 
-export function setPersistentToken(name: string, token: string): void {
+export function editPersistentDevice(
+  name: string,
+  input: Partial<DeviceInput>,
+): DeviceConfig {
+  return withConfigLock(() => editPersistentDeviceUnlocked(name, input));
+}
+
+function setPersistentTokenUnlocked(name: string, token: string): void {
   assertSafeToken(token); // untrimmed first
   const n = assertDeviceName(name);
   const disk = loadDiskConfig(true);
@@ -646,12 +716,16 @@ export function setPersistentToken(name: string, token: string): void {
   clearSessionToken(n);
 }
 
+export function setPersistentToken(name: string, token: string): void {
+  withConfigLock(() => setPersistentTokenUnlocked(name, token));
+}
+
 /**
  * Remove persistent device. If removeEnvKey and no other device references
  * tokenEnv, delete that key from fortigate.env (preserves comments otherwise).
  * Also drops any session shadow of the same name.
  */
-export function removePersistentDevice(
+function removePersistentDeviceUnlocked(
   name: string,
   opts?: { removeEnvKey?: boolean },
 ): void {
@@ -703,6 +777,13 @@ export function removePersistentDevice(
   }
 }
 
+export function removePersistentDevice(
+  name: string,
+  opts?: { removeEnvKey?: boolean },
+): void {
+  withConfigLock(() => removePersistentDeviceUnlocked(name, opts));
+}
+
 // ---------------------------------------------------------------------------
 // Credential source / storage reporting (values never returned)
 // ---------------------------------------------------------------------------
@@ -735,7 +816,7 @@ export function credentialSource(name: string): CredentialSource {
   if (!dev) return "none";
   const envName = dev.tokenEnv;
   if (envName) {
-    const fromProcess = process.env[envName];
+    const fromProcess = sharedConfig ? undefined : process.env[envName];
     if (fromProcess && fromProcess.trim() !== "") return "process";
     const fromFile = loadEnvFile()[envName];
     if (fromFile && fromFile.trim() !== "") return "env-file";
@@ -873,7 +954,7 @@ export function getToken(device: DeviceConfig): string {
   }
   // 1) real process env (shell / systemd)
   // 2) else ~/.pi/agent/fortigate.env next to fortigate.json
-  const fromProcess = process.env[envName];
+  const fromProcess = sharedConfig ? undefined : process.env[envName];
   const fromFile = loadEnvFile()[envName];
   const token =
     (fromProcess && fromProcess.trim() !== "" ? fromProcess : fromFile) || "";
