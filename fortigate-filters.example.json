@@ -297,11 +297,13 @@
         "mode",
         "role",
         "status",
+        "speed",
         "allowaccess",
         "alias",
         "description",
         "interface",
-        "vlanid"
+        "vlanid",
+        "member"
       ]
     },
     "get_firewall_sessions": {

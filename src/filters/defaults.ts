@@ -260,8 +260,8 @@ export const DEFAULT_FILTERS: FilterConfig = {
 		get_interfaces_config: {
 			dropValues: { disableDefaults: true },
 			allowlist: [
-				"name", "ip", "type", "vdom", "mode", "role", "status",
-				"allowaccess", "alias", "description", "interface", "vlanid",
+				"name", "ip", "type", "vdom", "mode", "role", "status", "speed",
+				"allowaccess", "alias", "description", "interface", "vlanid", "member",
 			],
 		},
 		get_firewall_sessions: {

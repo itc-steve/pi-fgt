@@ -125,7 +125,7 @@ export function filterAudit(): FilterAudit | null {
 	return {
 		keysDropped: ctx.stats.keysDropped,
 		groups: [...ctx.stats.groups].sort(),
-		hint: "Fields removed by ~/.pi/agent/fortigate-filters.json — set a group exclude:false there to get them back.",
+		hint: "Only listed rules removed fields; absent fields may not exist upstream. Adjust fortigate-filters.json to restore fields.",
 	};
 }
 

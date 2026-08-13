@@ -86,6 +86,20 @@ const AP_CLIENT = {
 	},
 };
 
+const AGGREGATE_INTERFACE = {
+	name: "fortilink",
+	type: "aggregate",
+	speed: "auto",
+	member: [{ "interface-name": "a" }, { "interface-name": "b" }],
+	"lacp-mode": "active",
+	"lacp-speed": "slow",
+	"min-links": 1,
+	"min-links-down": "operational",
+	bfd: "global",
+	stp: "disable",
+	algorithm: "L4",
+};
+
 // --- 1. uuid is gone, ops fields survive -----------------------------------
 {
 	const { out, stats } = run(POLICY, "get_firewall_policies");
@@ -143,6 +157,20 @@ const AP_CLIENT = {
 	assert.equal(out.security, undefined, "int dup of security_str dropped");
 	assert.equal(out.security_str, "wpa2_only_personal", "readable form survives");
 	assert.equal(out.noise, -95, "RF floor kept (exclude:false)");
+}
+
+// --- 5b. useful interface config survives; repeated LACP defaults do not ----
+{
+	const { out } = run(AGGREGATE_INTERFACE, "get_interfaces_config");
+	assert.equal(out.speed, "auto", "configured speed/duplex must survive");
+	assert.deepEqual(out.member, AGGREGATE_INTERFACE.member, "aggregate members must survive");
+	assert.equal(out["lacp-mode"], undefined, "repeated LACP defaults stay filtered");
+	assert.equal(out["lacp-speed"], undefined, "repeated LACP defaults stay filtered");
+	assert.equal(out["min-links"], undefined, "repeated LACP defaults stay filtered");
+	assert.equal(out["min-links-down"], undefined, "repeated LACP defaults stay filtered");
+	assert.equal(out.bfd, undefined, "unrelated link-protocol tuning stays filtered");
+	assert.equal(out.stp, undefined, "unrelated STP tuning stays filtered");
+	assert.equal(out.algorithm, undefined, "LACP load-balancing noise stays filtered");
 }
 
 // --- 6. health flattening ---------------------------------------------------
@@ -283,6 +311,7 @@ const AP_CLIENT = {
 		assert.ok(audit, "audit stamp required when fields were dropped");
 		assert.ok(audit!.keysDropped > 0);
 		assert.ok(audit!.groups.includes("uuid"));
+		assert.match(audit!.hint, /Only listed rules/, "audit must not imply absent API fields were filtered");
 	});
 
 	// verboseBypassesFilters defaults to true — verbose=true is documented as
