@@ -27,6 +27,7 @@ import {
 	formatDeviceStatusLines,
 	looksLikeTlsError,
 	MASKED_TOKEN_DISPLAY,
+	normalizeTextInputKey,
 	persistVerifySsl,
 	renderMaskedTokenPromptLines,
 	resolveDevicePick,
@@ -119,6 +120,14 @@ await check("wizardUiBlockReason: rpc/print/json block", () => {
 await check("wizardUiBlockReason: only tui passes", () => {
 	assert.equal(wizardUiBlockReason({ hasUI: true, mode: "tui" }), null);
 	assert.match(wizardUiBlockReason({ hasUI: false, mode: "tui" }) || "", /interactive|TUI/i);
+});
+
+// --- Text input key normalization ---
+await check("shift+backspace is normalized before every wizard Input", () => {
+	for (const sequence of ["\x1b[127;2u", "\x1b[127;2:2u"]) {
+		assert.equal(normalizeTextInputKey(sequence, "shift+backspace"), "\x7f");
+	}
+	assert.equal(normalizeTextInputKey("x", "x"), "x");
 });
 
 // --- Fixed mask constant (no length encoding) ---

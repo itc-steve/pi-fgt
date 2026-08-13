@@ -345,6 +345,32 @@ export function renderMaskedTokenPromptLines(
 	return raw.map((line) => truncateToWidth(line, w));
 }
 
+/** Work around pi-tui Input treating Kitty Shift+Backspace as printable DEL. */
+export function normalizeTextInputKey(data: string, keyId?: string): string {
+	return keyId === "shift+backspace" ? "\x7f" : data;
+}
+
+async function promptTextInput(
+	ctx: ExtensionContext,
+	title: string,
+	placeholder?: string,
+): Promise<string | undefined> {
+	const codingAgent: any = await import("@earendil-works/pi-coding-agent");
+	const tui: any = await import("@earendil-works/pi-tui");
+	return ctx.ui.custom<string | undefined>((_tui, _theme, _kb, done) => {
+		const component = new codingAgent.ExtensionInputComponent(
+			title,
+			placeholder,
+			done,
+			() => done(undefined),
+		);
+		const handleInput = component.handleInput.bind(component);
+		component.handleInput = (data: string) =>
+			handleInput(normalizeTextInputKey(data, tui.parseKey(data)));
+		return component;
+	});
+}
+
 /**
  * Masked token via pi-tui Input (Kitty printable + bracketed paste).
  * Render is always fixed MASKED_TOKEN_DISPLAY — never value or length.
@@ -355,7 +381,8 @@ export async function promptMaskedToken(
 	ctx: ExtensionContext,
 	title: string,
 ): Promise<string | undefined> {
-	const { Input, truncateToWidth } = await import("@earendil-works/pi-tui");
+	const tuiModule: any = await import("@earendil-works/pi-tui");
+	const { Input, parseKey, truncateToWidth } = tuiModule;
 	return ctx.ui.custom<string | undefined>((tui, theme, _kb, done) => {
 		const input = new Input();
 		// Cache keyed by width — never reuse wider lines after a narrower render.
@@ -389,7 +416,7 @@ export async function promptMaskedToken(
 			},
 			handleInput: (data: string) => {
 				if (finished) return;
-				input.handleInput(data);
+				input.handleInput(normalizeTextInputKey(data, parseKey(data)));
 				// Display is fixed — no visual change; still allow Input to process Kitty/paste.
 				tui.requestRender();
 			},
@@ -460,7 +487,7 @@ export async function runAddWizard(ctx: ExtensionContext): Promise<WizardResult>
 		tokenStorage = picked;
 	}
 
-	const nameRaw = await ctx.ui.input("Device name", "edge-fw");
+	const nameRaw = await promptTextInput(ctx, "Device name", "edge-fw");
 	if (!nameRaw?.trim()) {
 		ctx.ui.notify("Add cancelled — name required", "warn");
 		return { ok: false };
@@ -473,7 +500,7 @@ export async function runAddWizard(ctx: ExtensionContext): Promise<WizardResult>
 		return { ok: false };
 	}
 
-	const urlRaw = await ctx.ui.input("FortiGate host or URL", "fw.example.com");
+	const urlRaw = await promptTextInput(ctx, "FortiGate host or URL", "fw.example.com");
 	if (!urlRaw?.trim()) {
 		ctx.ui.notify("Add cancelled — URL required", "warn");
 		return { ok: false };
@@ -487,7 +514,7 @@ export async function runAddWizard(ctx: ExtensionContext): Promise<WizardResult>
 		return { ok: false };
 	}
 
-	const vdomRaw = await ctx.ui.input("VDOM", "root");
+	const vdomRaw = await promptTextInput(ctx, "VDOM", "root");
 	const vdom = (vdomRaw ?? "root").trim() || "root";
 
 	// Always start with verifySsl=true. Insecure only after TLS-failure confirm.
@@ -637,8 +664,8 @@ export async function runEditWizard(ctx: ExtensionContext): Promise<WizardResult
 		"info",
 	);
 
-	const urlRaw = await ctx.ui.input("URL (empty = keep)", prev.url);
-	const vdomRaw = await ctx.ui.input("VDOM (empty = keep)", prev.vdom ?? "root");
+	const urlRaw = await promptTextInput(ctx, "URL (empty = keep)", prev.url);
+	const vdomRaw = await promptTextInput(ctx, "VDOM (empty = keep)", prev.vdom ?? "root");
 	const sslChoice = await ctx.ui.select("TLS verification", [
 		`keep (${prev.verifySsl !== false ? "verify" : "insecure"})`,
 		"verify (verifySsl=true)",
