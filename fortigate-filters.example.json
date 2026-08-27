@@ -21,7 +21,8 @@
         "0.0.0.0 0.0.0.0",
         "::",
         "::/0",
-        "00:00:00:00:00:00"
+        "00:00:00:00:00:00",
+        "Reserved"
       ],
       "disableDefaults": false
     },
@@ -125,14 +126,11 @@
     },
     "duplicate_identity": {
       "exclude": true,
-      "why": "Fields that repeat a value already present under another key.",
+      "why": "Fields verified to repeat a value already present under another key.",
       "keys": [
         "wtp_name",
-        "switch_serial",
-        "connecting_from",
         "non_rc_gateway",
         "wtp_control_local_ip",
-        "host",
         "protocol_str"
       ]
     },
@@ -243,6 +241,54 @@
     }
   },
   "tools": {
+    "get_routing_table_ipv6": {
+      "groups": {
+        "ipv6": false
+      },
+      "dropValues": {
+        "byValue": []
+      }
+    },
+    "get_bgp_neighbors_ipv6": {
+      "groups": {
+        "ipv6": false
+      },
+      "dropValues": {
+        "byValue": []
+      }
+    },
+    "get_bgp_paths_ipv6": {
+      "groups": {
+        "ipv6": false
+      },
+      "dropValues": {
+        "byValue": []
+      }
+    },
+    "get_policy_routes_ipv6": {
+      "groups": {
+        "ipv6": false
+      },
+      "dropValues": {
+        "byValue": []
+      }
+    },
+    "get_sdwan_routes_ipv6": {
+      "groups": {
+        "ipv6": false
+      },
+      "dropValues": {
+        "byValue": []
+      }
+    },
+    "get_firewall_acl6_stats": {
+      "groups": {
+        "ipv6": false
+      },
+      "dropValues": {
+        "byValue": []
+      }
+    },
     "get_firewall_policies": {
       "dropValues": {
         "disableDefaults": true
@@ -259,8 +305,17 @@
         "status",
         "schedule",
         "nat",
+        "poolname",
         "logtraffic",
         "utm-status",
+        "inspection-mode",
+        "profile-group",
+        "ssl-ssh-profile",
+        "av-profile",
+        "webfilter-profile",
+        "dnsfilter-profile",
+        "ips-sensor",
+        "application-list",
         "comments"
       ]
     },
@@ -280,8 +335,17 @@
         "status",
         "schedule",
         "nat",
+        "poolname",
         "logtraffic",
         "utm-status",
+        "inspection-mode",
+        "profile-group",
+        "ssl-ssh-profile",
+        "av-profile",
+        "webfilter-profile",
+        "dnsfilter-profile",
+        "ips-sensor",
+        "application-list",
         "comments"
       ]
     },
@@ -307,18 +371,18 @@
       ]
     },
     "get_firewall_sessions": {
-      "groups": {
-        "session_forensics": false
-      },
       "allowlist": [
         "saddr",
         "sport",
         "daddr",
         "dport",
         "proto",
+        "snaddr",
+        "snport",
         "srcintf",
         "dstintf",
         "policyid",
+        "user",
         "duration",
         "sentbyte",
         "rcvdbyte",
@@ -345,14 +409,14 @@
     "get_routing_table": {
       "dropKeys": [
         "ip_version",
-        "vrf",
-        "origin"
+        "vrf"
       ],
       "allowlist": [
         "ip_mask",
         "gateway",
         "interface",
         "type",
+        "origin",
         "distance",
         "metric",
         "priority"
@@ -379,6 +443,8 @@
         "end-ip",
         "fqdn",
         "country",
+        "wildcard",
+        "macaddr",
         "interface",
         "associated-interface",
         "comment"
@@ -395,6 +461,7 @@
       "allowlist": [
         "name",
         "protocol",
+        "protocol-number",
         "tcp-portrange",
         "udp-portrange",
         "sctp-portrange",
@@ -407,6 +474,7 @@
       "allowlist": [
         "name",
         "type",
+        "status",
         "extip",
         "extintf",
         "mappedip",
@@ -414,12 +482,17 @@
         "protocol",
         "extport",
         "mappedport",
+        "server-type",
+        "ldb-method",
+        "realservers",
+        "monitor",
         "comment"
       ]
     },
     "get_admin_accounts": {
       "allowlist": [
         "name",
+        "status",
         "accprofile",
         "trusthost1",
         "trusthost2",
@@ -457,6 +530,8 @@
     "get_policy_hit_counts": {
       "allowlist": [
         "policyid",
+        "name",
+        "comments",
         "active_sessions",
         "bytes",
         "packets",
@@ -504,9 +579,6 @@
       ]
     },
     "get_wifi_clients": {
-      "keep": [
-        "host"
-      ],
       "allowlist": [
         "mac",
         "ip",
@@ -546,7 +618,9 @@
         "os_version",
         "fgt_peer_intf_name",
         "max_poe_budget",
-        "type"
+        "type",
+        "port_count",
+        "ports_up"
       ]
     },
     "get_logs": {
@@ -555,6 +629,7 @@
         "time",
         "action",
         "policyid",
+        "level",
         "srcip",
         "srcport",
         "srcintf",
@@ -566,6 +641,7 @@
         "service",
         "proto",
         "app",
+        "appcat",
         "duration",
         "sentbyte",
         "rcvdbyte",
@@ -577,10 +653,18 @@
         "url",
         "hostname",
         "catdesc",
+        "virus",
         "attack",
         "severity",
         "type",
-        "subtype"
+        "subtype",
+        "source",
+        "log_type",
+        "returned",
+        "fetched",
+        "ready",
+        "total_lines",
+        "polls"
       ]
     },
     "get_interfaces_status": {

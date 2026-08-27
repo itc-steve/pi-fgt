@@ -53,6 +53,7 @@ chmod 600 ~/.pi/agent/fortigate.env
 ```json
 {
   "sessionDefault": "off",
+  "fortigateDefault": "off",
   "maxResponseBytes": 24000,
   "devices": {
     "edge": {
@@ -64,6 +65,8 @@ chmod 600 ~/.pi/agent/fortigate.env
   }
 }
 ```
+
+`fortigateDefault`: `off` (missing = none), `on` (every configured device), a name (`"edge"`), or a list (`["edge","core"]`).
 
 `~/.pi/agent/fortigate.env`:
 
@@ -100,7 +103,7 @@ Run `/fortigate` — a picker opens (↑↓ move, enter/space toggle, `/` search
 | `/fortigate filters` | Which response fields are excluded |
 | `/fortigate add` / `token` / `edit` / `remove` | Setup wizards (see [Setup](#setup)) |
 
-Selection is in-memory and per session: nothing on disk, other pi terminals unaffected, `/new` or restart resets to all-hidden. No config setting can pre-select a device — except a device you just added with `/fortigate add`, which is selected for the rest of that session.
+`fortigateDefault` seeds which devices the AI can see at session start (`off` = none, `on` = all configured keys, or one or more names: `"edge"` / `["edge","core"]`). Missing = `off`. Preselecting any device also turns the tools on. Selection is still per session: `/fortigate off` or `/new` clears it; the JSON only sets the next session's default. `/fortigate add` selects that device for the rest of the current session.
 
 Session devices and session tokens are memory-only too: `/fortigate off` or a new session drops them.
 
@@ -118,7 +121,7 @@ Every tool takes an optional `device` name — omit it when only one device is s
 - Tokens only via env / `fortigate.env` / session memory — never in JSON, never in command args, masked in the wizard prompt
 - Shared config dir: `process.env` tokens ignored, `tokenEnv` namespace enforced
 - Setup wizards refuse to run outside TUI mode; connection errors are redacted and length-bounded
-- Device exposure opt-in per session, in-memory, never persisted
+- Device exposure opt-in per session (`fortigateDefault` seeds the next session; live selection is in-memory)
 
 ## Tools
 
@@ -142,7 +145,7 @@ Filtered responses carry a `_filtered` stamp naming what was dropped. `verbose=t
 cp /path/to/pi-fgt/fortigate-filters.example.json ~/.pi/agent/fortigate-filters.json
 ```
 
-Filters shrink what you fetch; they don't replace fetching less. Narrow at the source first — `source_ip`, `name=`, `up_only=true` — before dumping a whole catalog.
+Filters shrink what you fetch; they don't replace fetching less. Narrow at source first: log `action`/`srcip`/`dstip`/`policyid`, object `name`, session `policyid`, interface `link=up|down`, policy `zero_only=true`, or WiFi `poor_only=true`.
 
 <details>
 <summary><strong>Filter reference — precedence, groups, limits</strong></summary>

@@ -48,6 +48,11 @@ function fortiosNotes(payload: any): string | undefined {
   );
 }
 
+export function matchesLinkState(row: unknown, state: "up" | "down"): boolean {
+  const link = (row as any)?.link;
+  return state === "up" ? link === true || link === "up" : link === false || link === "down";
+}
+
 export function registerSystemTools(pi: ExtensionAPI): void {
   pi.registerTool({
     name: "get_system_status",
@@ -181,31 +186,36 @@ export function registerSystemTools(pi: ExtensionAPI): void {
     label: "FortiGate: Interfaces Status",
     description:
       "Live interface link/IP/counters (monitor/system/interface). " +
-      "Optional name= substring (e.g. wan, vlan). Results are a name→stats map.",
+      "Optional name= substring and link=up|down filters. Results are a name→stats map.",
     promptSnippet: "FortiGate interface status",
     parameters: Type.Object({
       ...deviceParam,
       name: Type.Optional(Type.String({ description: "Substring filter on interface name" })),
+      link: Type.Optional(
+        Type.Union([Type.Literal("up"), Type.Literal("down")], {
+          description: "Only interfaces whose link is up or down",
+        }),
+      ),
     }),
     async execute(_toolCallId, params, signal, onUpdate, ctx) {
       const { name, device: dev } = resolveDevice(params.device);
       const token = getToken(dev);
       let data: any = fortiResults(await fortiGet("monitor/system/interface", dev, token, {}, signal));
       const nameQ = String(params.name || "").trim().toLowerCase();
-      // Field selection is config-driven (filters tools.get_interfaces_status);
-      // only the name= search happens here.
-      if (nameQ && data && typeof data === "object" && !Array.isArray(data)) {
+      const link = params.link as "up" | "down" | undefined;
+      if ((nameQ || link) && data && typeof data === "object" && !Array.isArray(data)) {
         const out: Record<string, unknown> = {};
         for (const [k, v] of Object.entries(data as Record<string, any>)) {
-          if (!k.toLowerCase().includes(nameQ) && !String(v?.name || "").toLowerCase().includes(nameQ)) {
+          if (nameQ && !k.toLowerCase().includes(nameQ) && !String(v?.name || "").toLowerCase().includes(nameQ)) {
             continue;
           }
+          if (link && !matchesLinkState(v, link)) continue;
           out[k] = v;
         }
         data = out;
       }
       return textResult(
-        bounded(data, "Filter with name= (wan, vlan, …).", getMaxResponseBytes()),
+        bounded(data, "Filter with name= (wan, vlan, …) and/or link=up|down.", getMaxResponseBytes()),
         { device: name },
       );
     },

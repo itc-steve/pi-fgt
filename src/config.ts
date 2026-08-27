@@ -427,8 +427,42 @@ function emptyConfig(): FortiConfig {
   return {
     maxResponseBytes: 24000,
     sessionDefault: "off",
+    fortigateDefault: "off",
     devices: {},
   };
+}
+
+/** JSON "off" | "on" | "edge" | ["edge","core"] → stored form. Missing → off. */
+export function parseFortigateDefault(raw: unknown): FortiConfig["fortigateDefault"] {
+  if (raw == null) return "off";
+  if (Array.isArray(raw)) {
+    const names = [
+      ...new Set(
+        raw.filter((x): x is string => typeof x === "string").map((x) => x.trim()).filter(Boolean),
+      ),
+    ];
+    return names.length ? names : "off";
+  }
+  if (typeof raw !== "string") return "off";
+  const s = raw.trim();
+  if (!s) return "off";
+  const lower = s.toLowerCase();
+  if (lower === "off") return "off";
+  if (lower === "on") return "on";
+  return [s];
+}
+
+/** Seed this session's enabled set from fortigateDefault. Exact device keys only. */
+export function applyFortigateDefault(cfg: FortiConfig): string[] {
+  const def = cfg.fortigateDefault ?? "off";
+  const wanted = def === "off" ? [] : def === "on" ? Object.keys(cfg.devices) : def;
+  const selected: string[] = [];
+  for (const w of wanted) {
+    if (!cfg.devices[w] || enabled.has(w)) continue;
+    enabled.add(w);
+    selected.push(w);
+  }
+  return selected;
 }
 
 function loadDiskConfig(force = false): FortiConfig {
@@ -484,11 +518,13 @@ function loadDiskConfig(force = false): FortiConfig {
   const sessionRaw = String(parsed.sessionDefault ?? "off").trim().toLowerCase();
   const sessionDefault: FortiConfig["sessionDefault"] =
     sessionRaw === "on" ? "on" : "off";
+  const fortigateDefault = parseFortigateDefault(parsed.fortigateDefault);
 
   const cfg: FortiConfig = {
     // Floor 4k, default 24k — 120k used to flood model context
     maxResponseBytes: Math.max(4000, parsed.maxResponseBytes ?? 24000),
     sessionDefault,
+    fortigateDefault,
     devices,
   };
 
@@ -505,6 +541,9 @@ function cloneConfig(cfg: FortiConfig): FortiConfig {
   return {
     maxResponseBytes: cfg.maxResponseBytes,
     sessionDefault: cfg.sessionDefault,
+    fortigateDefault: Array.isArray(cfg.fortigateDefault)
+      ? [...cfg.fortigateDefault]
+      : cfg.fortigateDefault,
     devices,
   };
 }
@@ -512,6 +551,7 @@ function cloneConfig(cfg: FortiConfig): FortiConfig {
 function writeDiskConfig(cfg: FortiConfig): void {
   const payload = {
     sessionDefault: cfg.sessionDefault ?? "off",
+    fortigateDefault: cfg.fortigateDefault ?? "off",
     maxResponseBytes: cfg.maxResponseBytes ?? 24000,
     devices: cfg.devices,
   };
@@ -519,6 +559,7 @@ function writeDiskConfig(cfg: FortiConfig): void {
   // publish only after rename succeeds
   cached = cloneConfig({
     sessionDefault: payload.sessionDefault,
+    fortigateDefault: payload.fortigateDefault,
     maxResponseBytes: payload.maxResponseBytes,
     devices: payload.devices,
   });

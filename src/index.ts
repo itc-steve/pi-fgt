@@ -1,14 +1,13 @@
 /**
  * pi-fgt entry.
  * Registers all FortiGate tools, then keeps them OFF by default each session.
- * Every device also starts hidden from the AI; /fortigate and /fortigate on
- * open the picker so the human chooses which FortiGates this session exposes.
- * Selection is in-memory only — never saved, never shared between terminals.
+ * Devices start hidden unless fortigate.json fortigateDefault is on or names them.
+ * /fortigate and /fortigate on open the picker for this session only.
  * Footer status only shows when ON.
  */
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { loadConfig, listDevices, resetSessionVisibility } from "./config.js";
+import { applyFortigateDefault, loadConfig, listDevices, resetSessionVisibility } from "./config.js";
 import { showDevicePicker } from "./device-picker.js";
 import { loadFilters, filtersPath, filtersLoadError } from "./filters/index.js";
 import { withFilterContext } from "./filters/wrap.js";
@@ -119,7 +118,8 @@ export default function (pi: ExtensionAPI): void {
 			resetSessionVisibility();
 			loadFilters(true);
 			const cfg = loadConfig(true);
-			const wantOn = cfg.sessionDefault === "on";
+			const preselected = applyFortigateDefault(cfg);
+			const wantOn = cfg.sessionDefault === "on" || preselected.length > 0;
 			setFortiGateEnabled(pi, wantOn);
 			updateStatus(ctx);
 		} catch {
@@ -257,7 +257,7 @@ export default function (pi: ExtensionAPI): void {
 		}
 
 		ctx.ui.notify(
-			"Usage: /fortigate [on|off|toggle|status|filters|add|token|edit|remove]  — /fortigate opens the device picker. Devices are hidden from the AI until you select them, every session, never saved.",
+			"Usage: /fortigate [on|off|toggle|status|filters|add|token|edit|remove]  — /fortigate opens the device picker. Live selection is session-only; fortigateDefault can seed it.",
 			"warn",
 		);
 	};

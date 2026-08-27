@@ -32,6 +32,28 @@ export const FIREWALL_MONITOR_TOOL_NAMES = [
   "get_firewall_uuid_list",
 ] as const;
 
+export function buildLocalInPayload(
+  configured: unknown,
+  effective: unknown,
+  includeCompiled: boolean,
+): Record<string, unknown> {
+  const monitor = effective && typeof effective === "object" && !Array.isArray(effective)
+    ? effective as Record<string, unknown>
+    : {};
+  const { custom: compiledCustom, ...systemPolicies } = monitor;
+  const configuredAvailable = configured !== undefined;
+  return {
+    ...systemPolicies,
+    custom: configuredAvailable ? configured : compiledCustom,
+    ...(includeCompiled && configuredAvailable && compiledCustom !== undefined
+      ? { compiled_custom: compiledCustom }
+      : {}),
+    _hint: configuredAvailable
+      ? "custom is authoritative CMDB config. FortiOS's compiled_custom can omit named source objects and is diagnostic only."
+      : "CMDB local-in config was unavailable; custom is FortiOS's compiled monitor view and may omit named source objects.",
+  };
+}
+
 export function registerFirewallMonitorTools(pi: ExtensionAPI): void {
   pi.registerTool({
     name: "get_firewall_acl_stats",
@@ -326,16 +348,40 @@ export function registerFirewallMonitorTools(pi: ExtensionAPI): void {
   pi.registerTool({
     name: "get_local_in_policies",
     label: "FortiGate: Local In Policies",
-    description: "Implicit/explicit local-in policies (monitor/firewall/local-in). Read-only.",
+    description:
+      "Configured local-in policies from CMDB plus implicit/admin effective policies. " +
+      "verbose=true also includes FortiOS's compiled custom view, which may omit named source identities. Read-only.",
     promptSnippet: "FortiGate local in policies",
-    parameters: Type.Object({ ...deviceParam }),
+    parameters: Type.Object({
+      ...deviceParam,
+      verbose: Type.Optional(Type.Boolean({ description: "Include compiled custom monitor rules (diagnostic only)" })),
+    }),
     async execute(_id, params, signal) {
       try {
         const { name, device: dev } = resolveDevice(params.device);
         const token = getToken(dev);
-        let data = fortiResults(await fortiGet("monitor/firewall/local-in", dev, token, {}, signal));
+        const [configuredResult, effectiveResult] = await Promise.allSettled([
+          fortiGet("cmdb/firewall/local-in-policy", dev, token, {}, signal),
+          fortiGet("monitor/firewall/local-in", dev, token, {}, signal),
+        ]);
+        if (effectiveResult.status === "rejected") throw effectiveResult.reason;
+        if (
+          configuredResult.status === "rejected" &&
+          configuredResult.reason?.name === "AbortError"
+        ) throw configuredResult.reason;
+        const configured = configuredResult.status === "fulfilled"
+          ? fortiResults(configuredResult.value)
+          : undefined;
+        let data: unknown = buildLocalInPayload(
+          configured,
+          fortiResults(effectiveResult.value),
+          !!params.verbose,
+        );
         data = bounded(data, "Narrow the query if truncated.", getMaxResponseBytes());
-        return textResult(data, { device: name, path: "monitor/firewall/local-in" });
+        return textResult(data, {
+          device: name,
+          paths: ["cmdb/firewall/local-in-policy", "monitor/firewall/local-in"],
+        });
       } catch (e: any) {
         if (e?.name === "AbortError") throw e;
         return textResult(`Error: ${e?.message || String(e)}`);

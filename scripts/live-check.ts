@@ -1,4 +1,5 @@
 import { readFileSync } from "node:fs";
+import { Agent, fetch } from "undici";
 import { applyFilters, compile } from "../src/filters/engine.ts";
 import { DEFAULT_FILTERS } from "../src/filters/defaults.ts";
 
@@ -9,20 +10,28 @@ const env = Object.fromEntries(
 );
 const cfg = JSON.parse(readFileSync(process.env.HOME + "/.pi/agent/fortigate.json", "utf8"));
 const [devName, dev]: any = Object.entries(cfg.devices)[0];
+const dispatcher = new Agent({ connect: { rejectUnauthorized: dev.verifySsl !== false } });
 const token = env[dev.tokenEnv];
 
 async function get(path: string, q = "") {
   const url = `${dev.url}/api/v2/${path}?vdom=${dev.vdom||"root"}${q}`;
-  const r = await fetch(url, { headers: { Authorization: `Bearer ${token}` }, tls: { rejectUnauthorized: false } } as any);
-  return r.json();
+  const r = await fetch(url, { headers: { Authorization: `Bearer ${token}` }, dispatcher });
+  if (!r.ok) throw new Error(`${r.status} ${r.statusText}`);
+  return r.json() as Promise<any>;
 }
+
+const status = await get("monitor/system/status");
+const [, major = "0", minor = "0"] = /v?(\d+)\.(\d+)/.exec(String(status.version || "")) || [];
+const sessionPath = Number(major) > 7 || (Number(major) === 7 && Number(minor) >= 6)
+  ? "monitor/firewall/sessions"
+  : "monitor/firewall/session";
 const bytes = (o:any)=>JSON.stringify(o).length;
 const stats = ()=>({keysDropped:0,groups:new Set<string>()});
 
 const cases: Array<[string,string,string]> = [
   ["get_firewall_policies", "cmdb/firewall/policy", ""],
   ["get_interfaces_config", "cmdb/system/interface", ""],
-  ["get_firewall_sessions", "monitor/firewall/session", "&count=20&summary=true"],
+  ["get_firewall_sessions", sessionPath, "&count=20&summary=true"],
   ["get_dhcp_leases",       "monitor/system/dhcp", ""],
   ["get_routing_table",     "monitor/router/ipv4", "&count=50"],
   ["get_fortiaps",          "monitor/wifi/managed_ap", ""],
@@ -30,7 +39,7 @@ const cases: Array<[string,string,string]> = [
   ["get_address_objects",   "cmdb/firewall/address", ""],
 ];
 
-console.log(`device ${devName}\n`);
+console.log(`device ${devName} ${status.version || ""}\n`);
 console.log("tool".padEnd(24), "raw".padStart(9), "filtered".padStart(9), "cut".padStart(7), " groups");
 let tr=0, tf=0;
 for (const [tool, path, q] of cases) {
@@ -44,3 +53,4 @@ for (const [tool, path, q] of cases) {
   } catch(e:any) { console.log(tool.padEnd(24), "ERR", e.message); }
 }
 console.log("\nTOTAL".padEnd(24), String(tr).padStart(9), String(tf).padStart(9), `${(100-100*tf/tr).toFixed(0)}%`.padStart(7));
+await dispatcher.close();

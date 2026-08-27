@@ -9,6 +9,7 @@ import { fortiGet } from "../client.js";
 import { bounded } from "../bounds.js";
 import { clampPerPage, validateName } from "../validate.js";
 import { ALLOWED_LOG_SOURCES, ALLOWED_LOG_TYPES } from "../types.js";
+import { isFortiOsBadRequest } from "../filters/query.js";
 
 /** Default subtype when caller omits it (FortiOS path needs both segments). */
 const DEFAULT_SUBTYPE: Record<string, string> = {
@@ -84,6 +85,34 @@ function projectLogRow(row: any, _verbose: boolean): any {
 	return row;
 }
 
+/** FortiOS log `filter=` expressions. Values trimmed, not lowercased. Empty → []. */
+export function buildLogFilter(p: {
+	action?: string;
+	srcip?: string;
+	dstip?: string;
+	policyid?: string;
+}): string[] {
+	const out: string[] = [];
+	const add = (
+		field: string,
+		operator: "==" | "=@",
+		raw: string | undefined,
+		allowed: RegExp,
+	) => {
+		const value = String(raw ?? "").trim();
+		if (!value) return;
+		if (value.length > 128 || !allowed.test(value)) {
+			throw new Error(`${field} contains invalid filter characters`);
+		}
+		out.push(`${field}${operator}${value}`);
+	};
+	add("action", "==", p.action, /^[A-Za-z0-9_-]+$/);
+	add("srcip", "=@", p.srcip, /^[A-Fa-f0-9.:/%-]+$/);
+	add("dstip", "=@", p.dstip, /^[A-Fa-f0-9.:/%-]+$/);
+	add("policyid", "==", p.policyid, /^\d+$/);
+	return out;
+}
+
 /**
  * FortiOS log search is often async (esp. FortiAnalyzer):
  * first GET returns ready=false + session_id + empty results;
@@ -94,47 +123,63 @@ async function fetchLogRows(
 	dev: any,
 	token: string,
 	rows: number,
+	filters: string[],
 	signal?: AbortSignal,
 ): Promise<{
 	entries: any[];
 	meta: Record<string, unknown>;
 }> {
-	let raw: any = await fortiGet(path, dev, token, { rows, start: 0 }, signal);
-	let polls = 0;
-	const maxPolls = 20; // ~10s at 500ms — FAZ usually ready on poll 1
-	// FortiOS uses 0xFFFFFFFF when a backend isn't actually searchable
-	const SENTINEL_TOTAL = 4294967295;
+	const search = async (serverFilters: string[]) => {
+		const baseQuery = {
+			rows,
+			start: 0,
+			...(serverFilters.length ? { filter: serverFilters } : {}),
+		};
+		let raw: any = await fortiGet(path, dev, token, baseQuery, signal);
+		let polls = 0;
+		const maxPolls = 20; // ~10s at 500ms — FAZ usually ready on poll 1
+		const SENTINEL_TOTAL = 4294967295;
 
-	while (raw && raw.ready === false && polls < maxPolls) {
-		// No FAZ/cloud backend serving this category — don't burn 10s polling
-		if (Number(raw.total_lines) === SENTINEL_TOTAL && polls >= 1) break;
-		polls++;
-		await sleep(500, signal);
-		raw = await fortiGet(
-			path,
-			dev,
-			token,
-			{ rows, start: 0, session_id: raw.session_id },
-			signal,
-		);
-	}
+		while (raw && raw.ready === false && polls < maxPolls) {
+			if (Number(raw.total_lines) === SENTINEL_TOTAL && polls >= 1) break;
+			polls++;
+			await sleep(500, signal);
+			raw = await fortiGet(
+				path,
+				dev,
+				token,
+				{ ...baseQuery, session_id: raw.session_id },
+				signal,
+			);
+		}
 
-	const entries = Array.isArray(raw?.results) ? raw.results : [];
-	return {
-		entries,
-		meta: {
-			device: raw?.device,
-			category: raw?.category,
-			subcategory: raw?.subcategory,
-			ready: raw?.ready ?? true,
-			completed: raw?.completed,
-			percent_logs_processed: raw?.percent_logs_processed,
-			total_lines: raw?.total_lines,
-			polls,
-			session_id: raw?.session_id,
-			path,
-		},
+		return {
+			entries: Array.isArray(raw?.results) ? raw.results : [],
+			meta: {
+				device: raw?.device,
+				category: raw?.category,
+				subcategory: raw?.subcategory,
+				ready: raw?.ready ?? true,
+				completed: raw?.completed,
+				percent_logs_processed: raw?.percent_logs_processed,
+				total_lines: raw?.total_lines,
+				polls,
+				session_id: raw?.session_id,
+				path,
+				...(serverFilters.length ? { _server_filter: serverFilters } : {}),
+			},
+		};
 	};
+
+	try {
+		return await search(filters);
+	} catch (error: any) {
+		if (!filters.length || !isFortiOsBadRequest(error)) throw error;
+		const fallback = await search([]);
+		(fallback.meta as Record<string, unknown>)._filter_fallback =
+			"Server rejected filter=; filtered fetched window client-side.";
+		return fallback;
+	}
 }
 
 export function registerLogTools(pi: ExtensionAPI): void {
@@ -147,7 +192,7 @@ export function registerLogTools(pi: ExtensionAPI): void {
 			"log_type: traffic|event|virus|webfilter|ips|anomaly|app-ctrl|dlp|emailfilter " +
 			"(NOT parent 'utm' — children are top-level; utm/virus auto-maps to virus/virus). " +
 			"Default subtypes: traffic→forward, event→system, others→same as type. " +
-			"Optional client filters: action, srcip, dstip, policyid (FortiOS path subtype is often ignored). " +
+			"Optional server-side filters: action, srcip, dstip, policyid (FortiOS path subtype is often ignored). " +
 			"Check get_log_device_state / get_log_fortianalyzer_status first when unsure where logs land. " +
 			"Empty buffer ≠ API failure. rows max 50.",
 		promptSnippet: "FortiGate log query (memory/disk/FAZ)",
@@ -176,13 +221,13 @@ export function registerLogTools(pi: ExtensionAPI): void {
 			rows: Type.Optional(Type.Number({ description: "Row count (max 50)", default: 25 })),
 			action: Type.Optional(
 				Type.String({
-					description: "Client-side filter: accept|deny|client-rst|timeout|ip-conn|…",
+					description: "Server-side filter: accept|deny|client-rst|timeout|ip-conn|…",
 				}),
 			),
-			srcip: Type.Optional(Type.String({ description: "Client-side filter on srcip (substring)" })),
-			dstip: Type.Optional(Type.String({ description: "Client-side filter on dstip (substring)" })),
+			srcip: Type.Optional(Type.String({ description: "Server-side filter on srcip (substring)" })),
+			dstip: Type.Optional(Type.String({ description: "Server-side filter on dstip (substring)" })),
 			policyid: Type.Optional(
-				Type.String({ description: "Client-side filter on policyid (exact string match)" }),
+				Type.String({ description: "Server-side filter on policyid (exact string match)" }),
 			),
 			verbose: Type.Optional(
 				Type.Boolean({ description: "Return full log rows (default: projected ops fields only)" }),
@@ -225,11 +270,12 @@ export function registerLogTools(pi: ExtensionAPI): void {
 			const { name, device: dev } = resolveDevice(params.device);
 			const token = getToken(dev);
 			const path = `log/${src}/${lt}/${st}`;
+			const serverFilters = buildLogFilter(params);
 
 			let entries: any[];
 			let meta: Record<string, unknown>;
 			try {
-				({ entries, meta } = await fetchLogRows(path, dev, token, rows, signal));
+				({ entries, meta } = await fetchLogRows(path, dev, token, rows, serverFilters, signal));
 			} catch (e: any) {
 				if (e?.name === "AbortError") throw e;
 				const msg = String(e?.message || e);
@@ -319,23 +365,25 @@ export function registerLogTools(pi: ExtensionAPI): void {
 			if (notReady) {
 				hint =
 					`Log search not ready after ${meta.polls} polls (source=${src}). Retry get_logs; FAZ can be slow under load.`;
+			} else if (empty && src === "fortianalyzer" && Number(meta.total_lines) === 4294967295) {
+				hint =
+					`FAZ log search not available for this device (total_lines sentinel). ` +
+					`Check get_log_device_state / get_log_fortianalyzer_status — FAZ may be unregistered or not receiving logs. ` +
+					`Use source=memory for the live buffer.`;
+			} else if (empty && meta._filter_fallback && fetched > 0) {
+				hint = `Fetched ${fetched} rows after server filter fallback, but client filter matched 0: ${JSON.stringify(clientFilter)}. Broaden filters.`;
+			} else if (empty && Array.isArray(meta._server_filter)) {
+				hint = `No rows matched ${serverFilters.join(" AND ")} (ready=${meta.ready}, total_lines=${meta.total_lines}). Broaden filters.`;
 			} else if (empty && src === "fortianalyzer") {
-				const sentinel = Number(meta.total_lines) === 4294967295;
-				hint = sentinel
-					? `FAZ log search not available for this device (total_lines sentinel). ` +
-						`Check get_log_device_state / get_log_fortianalyzer_status — FAZ may be unregistered or not receiving logs. ` +
-						`Use source=memory for the live buffer.`
-					: `No FAZ rows for ${lt}/${st} (ready=${meta.ready}, total_lines=${meta.total_lines}, polls=${meta.polls}). ` +
-						`Confirm FAZ with get_log_fortianalyzer_status (registration/connection). ` +
-						`Try source=memory or another log_type.`;
+				hint = `No FAZ rows for ${lt}/${st} (ready=${meta.ready}, total_lines=${meta.total_lines}, polls=${meta.polls}). ` +
+					`Confirm FAZ with get_log_fortianalyzer_status (registration/connection). ` +
+					`Try source=memory or another log_type.`;
 			} else if (empty && src === "memory") {
 				hint =
 					`No rows in memory buffer for ${lt}/${st}. Not an API error. ` +
 					`Try source=fortianalyzer if FAZ is registered, or another type (traffic/forward for accepts/denies).`;
 			} else if (empty && src === "forticloud") {
 				hint = `No FortiCloud log rows for ${lt}/${st}. Check get_log_forticloud_status / licensing.`;
-			} else if (Object.keys(clientFilter).length && entries.length === 0 && fetched > 0) {
-				hint = `Fetched ${fetched} rows but client filter matched 0: ${JSON.stringify(clientFilter)}. Broaden filters.`;
 			}
 
 			const payload: Record<string, unknown> = {
@@ -347,7 +395,7 @@ export function registerLogTools(pi: ExtensionAPI): void {
 					subtype: st,
 					returned: entries.length,
 					fetched,
-					...(Object.keys(clientFilter).length ? { _client_filter: clientFilter } : {}),
+					...(meta._filter_fallback ? { _client_filter: clientFilter } : {}),
 					...(note ? { _mapped: note } : {}),
 					...(subtypeNote ? { _subtype_note: subtypeNote } : {}),
 				},

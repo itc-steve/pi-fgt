@@ -11,3 +11,4 @@ fortigate.env
 .vscode/
 dist/
 coverage/
+.test-out.*

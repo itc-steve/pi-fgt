@@ -44,9 +44,8 @@ export interface ToolOverride extends RuleBlock {
 	/** Per-tool group on/off, e.g. { session_forensics: false }. */
 	groups?: Record<string, boolean>;
 	/**
-	 * STRICT ALLOWLIST: when set, ONLY these fields are returned for this tool.
-	 * This is the strongest filter — everything unlisted is dropped regardless
-	 * of any other rule. Empty/absent = no allowlist (rules-only filtering).
+	 * STRICT ALLOWLIST: when set, only these fields plus keep[] are returned.
+	 * Empty/absent = no allowlist (rules-only filtering).
 	 * Set to null in your config to disable the allowlist and see all fields.
 	 */
 	allowlist?: string[] | null;
@@ -70,6 +69,14 @@ export interface FilterConfig {
 	};
 }
 
+const POLICY_ALLOW = [
+	"policyid", "name", "srcintf", "dstintf", "srcaddr", "dstaddr",
+	"service", "action", "status", "schedule", "nat", "poolname",
+	"logtraffic", "utm-status", "inspection-mode", "profile-group",
+	"ssl-ssh-profile", "av-profile", "webfilter-profile",
+	"dnsfilter-profile", "ips-sensor", "application-list", "comments",
+];
+
 export const DEFAULT_FILTERS: FilterConfig = {
 	enabled: true,
 
@@ -81,7 +88,7 @@ export const DEFAULT_FILTERS: FilterConfig = {
 			nullValue: true,
 		},
 		dropValues: {
-			byValue: ["0.0.0.0", "0.0.0.0 0.0.0.0", "::", "::/0", "00:00:00:00:00:00"],
+			byValue: ["0.0.0.0", "0.0.0.0 0.0.0.0", "::", "::/0", "00:00:00:00:00:00", "Reserved"],
 			disableDefaults: false,
 		},
 		dropKeys: ["q_origin_key"],
@@ -131,14 +138,11 @@ export const DEFAULT_FILTERS: FilterConfig = {
 		},
 		duplicate_identity: {
 			exclude: true,
-			why: "Fields that repeat a value already present under another key.",
+			why: "Fields verified to repeat a value already present under another key.",
 			keys: [
 				"wtp_name",
-				"switch_serial",
-				"connecting_from",
 				"non_rc_gateway",
 				"wtp_control_local_ip",
-				"host",
 				"protocol_str",
 			],
 		},
@@ -237,25 +241,25 @@ export const DEFAULT_FILTERS: FilterConfig = {
 		},
 	},
 
-	// allowlist = ONLY these fields come back (strongest filter, applied last).
+	// allowlist = ONLY these fields come back; keep[] keys are also admitted.
 	// These were hardcoded *_KEEP sets in src/types.ts before v1.3.0 — now
 	// visible and editable. Set an allowlist to null to see every field.
 	tools: {
+		// IPv6-specific tools must not inherit the global v4-network noise rule.
+		// Empty byValue also preserves valid :: and ::/0 routes/next hops.
+		get_routing_table_ipv6: { groups: { ipv6: false }, dropValues: { byValue: [] } },
+		get_bgp_neighbors_ipv6: { groups: { ipv6: false }, dropValues: { byValue: [] } },
+		get_bgp_paths_ipv6: { groups: { ipv6: false }, dropValues: { byValue: [] } },
+		get_policy_routes_ipv6: { groups: { ipv6: false }, dropValues: { byValue: [] } },
+		get_sdwan_routes_ipv6: { groups: { ipv6: false }, dropValues: { byValue: [] } },
+		get_firewall_acl6_stats: { groups: { ipv6: false }, dropValues: { byValue: [] } },
 		get_firewall_policies: {
 			dropValues: { disableDefaults: true },
-			allowlist: [
-				"policyid", "name", "srcintf", "dstintf", "srcaddr", "dstaddr",
-				"service", "action", "status", "schedule", "nat", "logtraffic",
-				"utm-status", "comments",
-			],
+			allowlist: POLICY_ALLOW,
 		},
 		get_firewall_policy: {
 			dropValues: { disableDefaults: true },
-			allowlist: [
-				"policyid", "name", "srcintf", "dstintf", "srcaddr", "dstaddr",
-				"service", "action", "status", "schedule", "nat", "logtraffic",
-				"utm-status", "comments",
-			],
+			allowlist: POLICY_ALLOW,
 		},
 		get_interfaces_config: {
 			dropValues: { disableDefaults: true },
@@ -265,12 +269,10 @@ export const DEFAULT_FILTERS: FilterConfig = {
 			],
 		},
 		get_firewall_sessions: {
-			groups: { session_forensics: false },
 			allowlist: [
-				"saddr", "sport", "daddr", "dport", "proto",
-				"srcintf", "dstintf", "policyid",
+				"saddr", "sport", "daddr", "dport", "proto", "snaddr", "snport",
+				"srcintf", "dstintf", "policyid", "user",
 				"duration", "sentbyte", "rcvdbyte", "apps",
-				// kept because session_forensics is ON for this tool
 				"country", "srcmac", "dstmac",
 			],
 		},
@@ -281,9 +283,9 @@ export const DEFAULT_FILTERS: FilterConfig = {
 			],
 		},
 		get_routing_table: {
-			dropKeys: ["ip_version", "vrf", "origin"],
+			dropKeys: ["ip_version", "vrf"],
 			allowlist: [
-				"ip_mask", "gateway", "interface", "type",
+				"ip_mask", "gateway", "interface", "type", "origin",
 				"distance", "metric", "priority",
 			],
 		},
@@ -296,7 +298,7 @@ export const DEFAULT_FILTERS: FilterConfig = {
 		get_address_objects: {
 			allowlist: [
 				"name", "type", "subnet", "start-ip", "end-ip", "fqdn", "country",
-				"interface", "associated-interface", "comment",
+				"wildcard", "macaddr", "interface", "associated-interface", "comment",
 			],
 		},
 		get_address_groups: {
@@ -304,19 +306,20 @@ export const DEFAULT_FILTERS: FilterConfig = {
 		},
 		get_service_objects: {
 			allowlist: [
-				"name", "protocol", "tcp-portrange", "udp-portrange",
+				"name", "protocol", "protocol-number", "tcp-portrange", "udp-portrange",
 				"sctp-portrange", "icmptype", "category", "comment",
 			],
 		},
 		get_vip_objects: {
 			allowlist: [
-				"name", "type", "extip", "extintf", "mappedip", "portforward",
-				"protocol", "extport", "mappedport", "comment",
+				"name", "type", "status", "extip", "extintf", "mappedip", "portforward",
+				"protocol", "extport", "mappedport", "server-type", "ldb-method",
+				"realservers", "monitor", "comment",
 			],
 		},
 		get_admin_accounts: {
 			allowlist: [
-				"name", "accprofile", "trusthost1", "trusthost2", "vdom",
+				"name", "status", "accprofile", "trusthost1", "trusthost2", "vdom",
 				"remote-auth", "two-factor", "comments",
 			],
 		},
@@ -333,10 +336,9 @@ export const DEFAULT_FILTERS: FilterConfig = {
 			],
 		},
 		get_policy_hit_counts: {
-			// last_used is gone on 7.6.7 (never present in live capture).
 			// asic/software/nturbo splits: verbose path bypasses this allowlist.
 			allowlist: [
-				"policyid", "active_sessions", "bytes", "packets", "hit_count",
+				"policyid", "name", "comments", "active_sessions", "bytes", "packets", "hit_count",
 			],
 		},
 		get_fortiview_statistics: {
@@ -357,12 +359,6 @@ export const DEFAULT_FILTERS: FilterConfig = {
 			],
 		},
 		get_wifi_clients: {
-			// host is in group duplicate_identity (dropKeys). Allowlist alone is
-			// not enough: allowlist projects first, then dropReason still kills
-			// dropKeys. keep[] is the only per-key override that beats every drop
-			// rule. groups:{duplicate_identity:false} would also re-admit wtp_name
-			// etc.; keep is the narrower fix.
-			keep: ["host"],
 			allowlist: [
 				"mac", "ip", "ssid", "vap_name", "wtp_id", "wtp_ip",
 				// 7.6.7 renames hostname → host; keep both for 7.4 boxes
@@ -378,20 +374,21 @@ export const DEFAULT_FILTERS: FilterConfig = {
 			allowlist: [
 				"switch-id", "serial", "status", "state", "connecting_from",
 				"join_time", "os_version", "fgt_peer_intf_name",
-				"max_poe_budget", "type",
+				"max_poe_budget", "type", "port_count", "ports_up",
 			],
 		},
 		get_logs: {
-			// Full FAZ rows are huge; dropped by default: itime/type/subtype/level/
-			// appcat/logid/vd/devname/srccountry/dstcountry (often "Reserved").
+			// Keep row identity/verdict fields plus search completeness metadata.
+			// Raw FAZ rows still contain many internal ids and duplicate labels.
 			allowlist: [
-				"date", "time", "action", "policyid",
+				"date", "time", "action", "policyid", "level",
 				"srcip", "srcport", "srcintf", "srcname",
 				"dstip", "dstport", "dstintf", "dstname",
-				"service", "proto", "app", "duration",
+				"service", "proto", "app", "appcat", "duration",
 				"sentbyte", "rcvdbyte", "user", "msg", "logdesc", "reason",
-				"sessionid", "url", "hostname", "catdesc", "attack", "severity",
-				"type", "subtype",
+				"sessionid", "url", "hostname", "catdesc", "virus", "attack",
+				"severity", "type", "subtype", "source", "log_type",
+				"returned", "fetched", "ready", "total_lines", "polls",
 			],
 		},
 		get_interfaces_status: {

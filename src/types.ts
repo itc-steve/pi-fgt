@@ -33,6 +33,12 @@ export type CredentialSource = "session" | "process" | "env-file" | "none";
 /** Session start default for FortiGate tools. "off" = must /fortigate on each new session. */
 export type SessionDefault = "on" | "off";
 
+/**
+ * Which devices are selected at session_start.
+ * "off" = none, "on" = all configured, or a list of device keys.
+ */
+export type FortigateDefault = "on" | "off" | string[];
+
 export interface FortiConfig {
   maxResponseBytes?: number;
   /**
@@ -40,6 +46,11 @@ export interface FortiConfig {
    * Default: "off" — use `/fortigate on` each new session.
    */
   sessionDefault?: SessionDefault;
+  /**
+   * Devices visible to the AI at session_start.
+   * Default: "off". "on" = all configured keys; otherwise named keys only.
+   */
+  fortigateDefault?: FortigateDefault;
   devices: Record<string, DeviceConfig>;
 }
 

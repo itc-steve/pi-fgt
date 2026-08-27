@@ -8,6 +8,7 @@ import { resolveDevice, getToken, getMaxResponseBytes } from "../config.js";
 import { fortiGet, fortiResults } from "../client.js";
 import { bounded } from "../bounds.js";
 import { validateName } from "../validate.js";
+import { isFortiOsBadRequest } from "../filters/query.js";
 
 // Field selection lives in src/filters/defaults.ts (tools.<name>.allowlist),
 // so users can see and change it via ~/.pi/agent/fortigate-filters.json.
@@ -20,6 +21,11 @@ const nameFilterParam = Type.Optional(
 	Type.String({ description: "Substring filter on object name (case-insensitive)" }),
 );
 
+export function buildCmdbNameFilter(name: unknown): string | undefined {
+	const value = String(name ?? "").trim();
+	return value ? `name=@${validateName(value, "name")}` : undefined;
+}
+
 async function cmdbList(
 	path: string,
 	params: { device?: string; verbose?: boolean; name?: string },
@@ -28,13 +34,29 @@ async function cmdbList(
 ) {
 	const { name, device: dev } = resolveDevice(params.device);
 	const token = getToken(dev);
-	let data = fortiResults(await fortiGet(path, dev, token, {}, signal));
+	const filter = buildCmdbNameFilter(params.name);
+	let raw: any;
+	let filterFallback = false;
+	try {
+		raw = await fortiGet(path, dev, token, filter ? { filter } : {}, signal);
+	} catch (error: any) {
+		if (!filter || !isFortiOsBadRequest(error)) throw error;
+		filterFallback = true;
+		raw = await fortiGet(path, dev, token, {}, signal);
+	}
+	let data = fortiResults(raw);
 	const nameQ = String(params.name || "").trim().toLowerCase();
+	// Safety net for old builds that reject filter= and inconsistent endpoint behavior.
 	if (nameQ && Array.isArray(data)) {
 		data = data.filter((row: any) => String(row?.name || "").toLowerCase().includes(nameQ));
 	}
 	data = bounded(data, hint, getMaxResponseBytes());
-	return textResult(data, { device: name, path });
+	return textResult(data, {
+		device: name,
+		path,
+		...(filter && !filterFallback ? { filter } : {}),
+		...(filterFallback ? { _filter_fallback: "Server rejected filter=; filtered fetched window client-side." } : {}),
+	});
 }
 
 export function registerFirewallTools(pi: ExtensionAPI): void {

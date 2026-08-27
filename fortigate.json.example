@@ -1,5 +1,6 @@
 {
   "sessionDefault": "off",
+  "fortigateDefault": "off",
   "maxResponseBytes": 24000,
   "devices": {
     "edge": {

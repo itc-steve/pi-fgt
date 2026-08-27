@@ -2,6 +2,7 @@
 
 import { fetch, Agent } from "undici";
 import { relocationMessage } from "./version.js";
+import { buildQueryString } from "./filters/query.js";
 
 const DEFAULT_TIMEOUT_MS = 30_000;
 
@@ -155,16 +156,9 @@ export async function fortiGet(
   const base = device.url.replace(/\/$/, "");
   const p = path.replace(/^\//, "");
 
-  // Always pin device VDOM; never allow caller override via params.vdom
-  const qs = new URLSearchParams();
-  qs.set("vdom", device.vdom || "root");
-  if (params) {
-    for (const [k, v] of Object.entries(params)) {
-      if (k === "vdom" || v === undefined || v === null) continue;
-      qs.set(k, String(v));
-    }
-  }
-  const url = `${base}/api/v2/${p}?${qs.toString()}`;
+  // Always pin device VDOM; never allow caller override via params.vdom.
+  const qs = buildQueryString(params, device.vdom || "root");
+  const url = `${base}/api/v2/${p}?${qs}`;
 
   const verifySsl = device.verifySsl !== false;
   const agent = getAgent(verifySsl);

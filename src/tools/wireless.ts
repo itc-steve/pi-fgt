@@ -8,6 +8,18 @@ import { resolveDevice, getToken, getMaxResponseBytes } from "../config.js";
 import { fortiGet, fortiResults } from "../client.js";
 import { bounded } from "../bounds.js";
 
+/** WiFi stations with RF problems. Missing health → keep. signal < -70 also keeps. */
+export function poorOnlyClients(rows: unknown[]): unknown[] {
+	return rows.filter((c: any) => {
+		if (typeof c?.signal === "number" && c.signal < -70) return true;
+		const h = c?.health;
+		if (!h || typeof h !== "object") return true;
+		return Object.values(h).some(
+			(v: any) => v && typeof v === "object" && v.severity != null && v.severity !== "good",
+		);
+	});
+}
+
 export function registerWirelessTools(pi: ExtensionAPI): void {
 	pi.registerTool({
 		name: "get_fortiaps",
@@ -40,7 +52,7 @@ export function registerWirelessTools(pi: ExtensionAPI): void {
 		name: "get_wifi_clients",
 		label: "FortiGate: WiFi Clients",
 		description:
-			"Connected WiFi stations (monitor/wifi/client). Optional filter by AP serial (wtp_id) or SSID (substring).",
+			"Connected WiFi stations (monitor/wifi/client). Optional AP/SSID filters; poor_only keeps non-good health or signal below -70 dBm.",
 		promptSnippet: "FortiGate WiFi client stations",
 		parameters: Type.Object({
 			...deviceParam,
@@ -51,6 +63,9 @@ export function registerWirelessTools(pi: ExtensionAPI): void {
 				Type.String({
 					description: "Filter by SSID or VAP name (substring, case-insensitive)",
 				}),
+			),
+			poor_only: Type.Optional(
+				Type.Boolean({ description: "Only clients with non-good health, missing health, or signal below -70 dBm" }),
 			),
 			verbose: Type.Optional(Type.Boolean({ description: "Full client records" })),
 		}),
@@ -76,10 +91,11 @@ export function registerWirelessTools(pi: ExtensionAPI): void {
 						return hay.includes(ssid);
 					});
 				}
+				if (params.poor_only) data = poorOnlyClients(data);
 			}
 			data = bounded(
 				data,
-				"Filter with ap= or ssid= to narrow large client lists.",
+				"Filter with ap=, ssid=, or poor_only=true to narrow large client lists.",
 				getMaxResponseBytes(),
 			);
 			return textResult(data, { device: name, path: "monitor/wifi/client" });

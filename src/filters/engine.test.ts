@@ -111,12 +111,12 @@ const AGGREGATE_INTERFACE = {
 	assert.ok(stats.groups.has("uuid"), "uuid group must be reported");
 }
 
-// --- 2. keep[] beats disableDefaults ---------------------------------------
+// --- 2. allowlisted defaults survive value filtering -----------------------
 {
 	const { out } = run(POLICY, "get_firewall_policies");
-	// logtraffic:"disable" would normally die under disableDefaults,
-	// but this tool lists it in keep[] — a security-relevant field.
-	assert.equal(out.logtraffic, "disable", "keep[] must override disableDefaults");
+	// logtraffic:"disable" would normally die under disableDefaults, but it is
+	// explicitly allowlisted because disabled logging is security-relevant.
+	assert.equal(out.logtraffic, "disable", "allowlist must override disableDefaults");
 	assert.equal(out.status, "enable");
 	// not in keep[], value "disable" → gone
 	assert.equal(out.nat64, undefined, "disableDefaults must drop nat64");
@@ -273,6 +273,117 @@ const AGGREGATE_INTERFACE = {
 		"disable",
 		"prefix group must re-admit past the allowlist when exclude:false",
 	);
+}
+
+// --- 8c. keep[] also beats a strict allowlist -------------------------------
+{
+	const cfg: FilterConfig = {
+		...DEFAULT_FILTERS,
+		tools: {
+			...DEFAULT_FILTERS.tools,
+			probe: { keep: ["diagnostic"], allowlist: ["id"] },
+		},
+	};
+	const { out } = run({ id: 1, diagnostic: "needed", junk: "drop" }, "probe", cfg);
+	assert.deepEqual(out, { id: 1, diagnostic: "needed" });
+}
+
+// --- 8d. compact views retain fields needed for normal troubleshooting -------
+{
+	const ipv6 = run(
+		{ ip6: "::/0", ipv6_gateway: "fe80::1", interface: "wan1", type: "static" },
+		"get_routing_table_ipv6",
+	).out;
+	assert.equal(ipv6.ip6, "::/0", "IPv6 route destination must survive the IPv6 tool");
+	assert.equal(ipv6.ipv6_gateway, "fe80::1", "IPv6 next hop must survive the IPv6 tool");
+
+	const session = run(
+		{ ...SESSION, snaddr: "203.0.113.8", snport: 45001, user: "alice" },
+		"get_firewall_sessions",
+	).out;
+	assert.equal(session.snaddr, "203.0.113.8", "translated source must survive");
+	assert.equal(session.snport, 45001, "translated source port must survive");
+	assert.equal(session.user, "alice", "authenticated user must survive");
+
+	const log = run(
+		{
+			date: "2026-08-26", time: "12:00:00", level: "critical", virus: "EICAR",
+			appcat: "Malware",
+			_meta: { subtype: "virus", source: "fortianalyzer", returned: 1, fetched: 50,
+				ready: true, total_lines: 50, polls: 2, junk: "drop" },
+		},
+		"get_logs",
+	).out;
+	assert.equal(log.level, "critical", "event severity must survive");
+	assert.equal(log.virus, "EICAR", "malware name must survive");
+	assert.equal(log.appcat, "Malware", "application category must survive");
+	assert.equal(log._meta.total_lines, 50, "log completeness metadata must survive");
+	assert.equal(log._meta.junk, undefined, "nested records remain projected");
+
+	const policy = run(
+		{
+			...POLICY, poolname: [{ name: "egress-pool" }],
+			"inspection-mode": "flow", "ssl-ssh-profile": "certificate-inspection",
+			"av-profile": "default", "webfilter-profile": "default",
+		},
+		"get_firewall_policy",
+	).out;
+	assert.deepEqual(policy.poolname, [{ name: "egress-pool" }]);
+	assert.equal(policy["ssl-ssh-profile"], "certificate-inspection");
+	assert.equal(policy["av-profile"], "default");
+
+	const address = run(
+		{ name: "printer", type: "mac", macaddr: [{ macaddr: "00:11:22:33:44:55" }] },
+		"get_address_objects",
+	).out;
+	assert.ok(address.macaddr, "MAC address object value must survive");
+
+	const wildcard = run(
+		{ name: "legacy-net", type: "wildcard", wildcard: "192.0.2.0 0.0.0.255" },
+		"get_address_objects",
+	).out;
+	assert.equal(wildcard.wildcard, "192.0.2.0 0.0.0.255");
+
+	const service = run(
+		{ name: "GRE", protocol: "IP", "protocol-number": 47, helper: "auto" },
+		"get_service_objects",
+	).out;
+	assert.equal(service["protocol-number"], 47, "IP service protocol must survive");
+	assert.equal(service.helper, undefined, "unlisted service noise stays filtered");
+
+	const vip = run(
+		{ name: "web", type: "server-load-balance", status: "disable", "ldb-method": "round-robin",
+			realservers: [{ ip: "192.0.2.10", port: 443 }], monitor: [{ name: "https" }] },
+		"get_vip_objects",
+	).out;
+	assert.equal(vip.status, "disable", "disabled VIP must not look enabled");
+	assert.ok(vip.realservers, "load-balancer members must survive");
+
+	const route = run(
+		{ ip_mask: "0.0.0.0/0", gateway: "192.0.2.1", type: "static", origin: "sd-wan", vrf: 0 },
+		"get_routing_table",
+	).out;
+	assert.equal(route.origin, "sd-wan", "route provenance must survive");
+	assert.equal(route.vrf, undefined, "single-VDOM routing noise stays filtered");
+
+	const admin = run(
+		{ name: "ops", status: "disable", accprofile: "super_admin", password: "not-returned" },
+		"get_admin_accounts",
+	).out;
+	assert.equal(admin.status, "disable", "disabled admin must not look enabled");
+	assert.equal(admin.password, undefined);
+	assert.equal(run({ host: "198.51.100.4" }, "get_current_admins").out.host, "198.51.100.4");
+
+	const sw = run(
+		{ "switch-id": "S1", connecting_from: "port1", status: "Connected",
+			port_count: 24, ports_up: 8 },
+		"get_fortiswitches",
+	).out;
+	assert.equal(sw.connecting_from, "port1", "switch topology must survive");
+	assert.equal(sw.port_count, 24, "derived switch port count must survive its allowlist");
+	assert.equal(sw.ports_up, 8, "derived switch up count must survive its allowlist");
+	const port = run({ interface: "port1", switch_serial: "S1" }, "get_switch_port_status").out;
+	assert.equal(port.switch_serial, "S1", "switch port identity must survive");
 }
 
 // --- 9. enabled:false is a true bypass --------------------------------------

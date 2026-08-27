@@ -16,6 +16,28 @@ function withCompactApps(row: any): any {
   return apps ? { ...row, apps } : row;
 }
 
+/** Unused policies: hit_count=0 and no sessions. policyid 0 is implicit local-in. */
+export function zeroOnlyHits(rows: unknown[]): unknown[] {
+  return rows.filter((row: any) =>
+    Number(row?.policyid) !== 0 &&
+    Number(row?.hit_count) === 0 &&
+    Number(row?.active_sessions || 0) === 0,
+  );
+}
+
+/** Attach policy name/comments from cmdb onto monitor hit-count rows. */
+export function joinPolicyNames(hits: unknown[], policies: unknown[]): unknown[] {
+  const names = new Map<number, { name?: unknown; comments?: unknown }>();
+  for (const p of policies as any[]) {
+    if (p == null || p.policyid == null) continue;
+    names.set(Number(p.policyid), { name: p.name, comments: p.comments });
+  }
+  return (hits as any[]).map((row) => {
+    const extra = names.get(Number(row?.policyid));
+    return extra ? { ...row, name: extra.name, comments: extra.comments } : row;
+  });
+}
+
 export function registerNetworkTools(pi: ExtensionAPI): void {
   pi.registerTool({
     name: "get_routing_table",
@@ -122,7 +144,7 @@ export function registerNetworkTools(pi: ExtensionAPI): void {
     description:
       "Active sessions (monitor/firewall/sessions) — who is talking to whom right now. " +
       "Default projects to saddr/daddr/ports/proto/intf/policyid/bytes/duration + compact apps. " +
-      "ALWAYS pass source_ip or dest_ip for host forensics (client-side on fetched window). " +
+      "ALWAYS pass source_ip, dest_ip, or policyid for forensics (client-side on fetched window). " +
       "verbose=true for full FortiOS fields. details is partial — see _hint.",
     promptSnippet: "FortiGate sessions",
     parameters: Type.Object({
@@ -130,18 +152,20 @@ export function registerNetworkTools(pi: ExtensionAPI): void {
       count: Type.Optional(Type.Number({ default: 25 })),
       source_ip: Type.Optional(Type.String({ description: "Filter by source IP (substring; client-side on fetched window)" })),
       dest_ip: Type.Optional(Type.String({ description: "Filter by dest IP (substring; client-side on fetched window)" })),
+      policyid: Type.Optional(Type.String({ description: "Filter by policyid (exact; client-side on fetched window)" })),
       verbose: Type.Optional(Type.Boolean({ description: "Full session fields (default: projected ops fields)" })),
     }),
     async execute(_toolCallId, params, signal, onUpdate, ctx) {
       const c = clampPerPage(params.count || 25);
       const src = String(params.source_ip || "").trim().toLowerCase();
       const dst = String(params.dest_ip || "").trim().toLowerCase();
+      const policy = String(params.policyid || "").trim();
       // FortiOS 7.6+ requires count on monitor/firewall/sessions (424 without it).
       // API count range: 20..1000; values below 20 are rounded up by FortiOS.
       // c is the user-facing row limit; fetchCount is the API fetch window, which
       // is NOT clampPerPage-capped (that cap is 50, the per-tool row limit).
       const SESSION_FETCH_MAX = 1000;
-      const fetchCount = src || dst ? SESSION_FETCH_MAX : Math.max(20, c);
+      const fetchCount = src || dst || policy ? SESSION_FETCH_MAX : Math.max(20, c);
       const q: Record<string, string | number> = { count: fetchCount, summary: "true" };
       // FortiOS 7.4 ignores srcaddr4/dstaddr4 on this endpoint — filter client-side.
       const { name, device: dev } = resolveDevice(params.device);
@@ -154,10 +178,11 @@ export function registerNetworkTools(pi: ExtensionAPI): void {
         const sessionCount = data.summary?.session_count;
         const apiMatched = data.summary?.matched_count;
 
-        if (src || dst) {
+        if (src || dst || policy) {
           details = details.filter((row: any) => {
             if (src && !String(row?.saddr || "").toLowerCase().includes(src)) return false;
             if (dst && !String(row?.daddr || "").toLowerCase().includes(dst)) return false;
+            if (policy && String(row?.policyid ?? "") !== policy) return false;
             return true;
           });
           const matchedInWindow = details.length;
@@ -188,13 +213,13 @@ export function registerNetworkTools(pi: ExtensionAPI): void {
               _partial: true,
               _returned: details.length,
               _total_matched: apiMatched,
-              _hint: `details is first ${details.length} of ${apiMatched} matched sessions; raise count (max ${PER_PAGE_CAP}) or filter source_ip/dest_ip.`,
+              _hint: `details is first ${details.length} of ${apiMatched} matched sessions; raise count (max ${PER_PAGE_CAP}) or filter source_ip/dest_ip/policyid.`,
             };
           }
         }
       }
 
-      return textResult(bounded(data, "Use source_ip/dest_ip filters for large tables.", getMaxResponseBytes()), {
+      return textResult(bounded(data, "Use source_ip/dest_ip/policyid filters for large tables.", getMaxResponseBytes()), {
         device: name,
       });
     },
@@ -206,17 +231,29 @@ export function registerNetworkTools(pi: ExtensionAPI): void {
     description:
       "Live policy counters: active_sessions/bytes/packets per policyid (monitor/firewall/policy). " +
       "Default drops 1-week history arrays + asic/software/nturbo splits (verbose=true for full). " +
-      "Correlate policyid with get_firewall_policies. Zero hits ≠ policy disabled.",
+      "Includes configured policy names. zero_only=true finds policies with no hits or active sessions. " +
+      "Zero hits ≠ policy disabled.",
     promptSnippet: "FortiGate policy hits",
     parameters: Type.Object({
       ...deviceParam,
+      zero_only: Type.Optional(Type.Boolean({ description: "Only configured policies with zero hits and zero active sessions" })),
       verbose: Type.Optional(Type.Boolean({ description: "Include week arrays + asic/software splits" })),
     }),
     async execute(_toolCallId, params, signal, onUpdate, ctx) {
       const { name, device: dev } = resolveDevice(params.device);
       const token = getToken(dev);
-      let data = fortiResults(await fortiGet("monitor/firewall/policy", dev, token, {}, signal));
-      return textResult(bounded(data, "Correlate with get_firewall_policy; verbose=true for week history.", getMaxResponseBytes()), { device: name });
+      let data: any = fortiResults(await fortiGet("monitor/firewall/policy", dev, token, {}, signal));
+      if (Array.isArray(data)) {
+        try {
+          const policies = fortiResults(await fortiGet("cmdb/firewall/policy", dev, token, {}, signal));
+          data = joinPolicyNames(data, Array.isArray(policies) ? policies : []);
+        } catch (error: any) {
+          if (error?.name === "AbortError") throw error;
+          // Counters remain useful when the optional name lookup is unavailable.
+        }
+        if (params.zero_only) data = zeroOnlyHits(data);
+      }
+      return textResult(bounded(data, "Use zero_only=true for unused-policy audits; verbose=true for week history.", getMaxResponseBytes()), { device: name });
     },
   });
 }

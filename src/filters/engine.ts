@@ -1,8 +1,8 @@
 /**
  * Rule-based response filter.
  *
- * Precedence (first match wins):
- *   keep[]  → always survives
+ * Precedence: keep[] is admitted through an allowlist, then always survives;
+ * record allowlist projection runs before the remaining drop rules:
  *   dropKeys / group keys
  *   dropPrefixes / dropSuffixes / group prefixes+suffixes
  *   dropValues (byValue, disableDefaults)
@@ -83,6 +83,7 @@ export function compile(cfg: FilterConfig, toolName?: string): Compiled {
 	const allow = tool?.allowlist;
 	const allowSet =
 		Array.isArray(allow) && allow.length > 0 ? new Set(allow) : null;
+	if (allowSet) for (const k of keep) allowSet.add(k);
 	const allowPatterns: Array<["p" | "s", string]> = [];
 	if (allowSet) {
 		for (const [name, g] of Object.entries(cfg.groups || {})) {

@@ -33,6 +33,7 @@ import {
   normalizeDeviceUrl,
   parseEnvFile,
   removePersistentDevice,
+  applyFortigateDefault,
   resetSessionVisibility,
   resolveDevice,
   setDeviceEnabled,
@@ -673,7 +674,84 @@ check("shared config rejects tokenEnv outside the FortiGate namespace", () => {
   }
 });
 
-// cleanup
+function seedTwo(): void {
+  writeFileSync(
+    join(root, "fortigate.json"),
+    JSON.stringify({
+      sessionDefault: "off",
+      maxResponseBytes: 24000,
+      devices: {
+        edge: { url: "https://e.example:443", tokenEnv: "E", vdom: "root", verifySsl: true },
+        core: { url: "https://c.example:443", tokenEnv: "C", vdom: "root", verifySsl: true },
+      },
+    }),
+  );
+}
+
+check("fortigateDefault missing / off selects nothing", () => {
+  seedTwo();
+  const cfg = loadConfig(true);
+  assert.equal(cfg.fortigateDefault, "off");
+  assert.deepEqual(applyFortigateDefault(cfg), []);
+  assert.deepEqual(listDevices(), []);
+
+  writeFileSync(
+    join(root, "fortigate.json"),
+    JSON.stringify({ sessionDefault: "off", fortigateDefault: "OFF", devices: { edge: { url: "https://e.example:443", tokenEnv: "E" } } }),
+  );
+  const off = loadConfig(true);
+  assert.equal(off.fortigateDefault, "off");
+  assert.deepEqual(applyFortigateDefault(off), []);
+});
+
+check("fortigateDefault on selects all configured devices", () => {
+  seedTwo();
+  const disk = JSON.parse(readFileSync(join(root, "fortigate.json"), "utf-8"));
+  disk.fortigateDefault = "on";
+  writeFileSync(join(root, "fortigate.json"), JSON.stringify(disk));
+  const cfg = loadConfig(true);
+  assert.equal(cfg.fortigateDefault, "on");
+  assert.deepEqual(applyFortigateDefault(cfg), ["edge", "core"]);
+  assert.deepEqual(listDevices().map((d) => d.name), ["edge", "core"]);
+});
+
+check("fortigateDefault names: string, list; unknown skipped", () => {
+  seedTwo();
+  const write = (fortigateDefault: unknown) => {
+    const disk = JSON.parse(readFileSync(join(root, "fortigate.json"), "utf-8"));
+    disk.fortigateDefault = fortigateDefault;
+    writeFileSync(join(root, "fortigate.json"), JSON.stringify(disk));
+    resetSessionVisibility();
+    return loadConfig(true);
+  };
+
+  let cfg = write("edge");
+  assert.deepEqual(cfg.fortigateDefault, ["edge"]);
+  assert.deepEqual(applyFortigateDefault(cfg), ["edge"]);
+  assert.deepEqual(listDevices().map((d) => d.name), ["edge"]);
+
+  cfg = write(["core", "nope"]);
+  assert.deepEqual(cfg.fortigateDefault, ["core", "nope"]);
+  assert.deepEqual(applyFortigateDefault(cfg), ["core"]);
+  assert.deepEqual(listDevices().map((d) => d.name), ["core"]);
+
+  cfg = write([" edge ", "edge", 42, null, {}]);
+  assert.deepEqual(cfg.fortigateDefault, ["edge"]);
+  assert.deepEqual(applyFortigateDefault(cfg), ["edge"]);
+});
+
+check("fortigateDefault survives persistent add rewrite", () => {
+  seedTwo();
+  const disk = JSON.parse(readFileSync(join(root, "fortigate.json"), "utf-8"));
+  disk.fortigateDefault = ["edge"];
+  writeFileSync(join(root, "fortigate.json"), JSON.stringify(disk));
+  loadConfig(true);
+  addPersistentDevice("lab", { url: "https://lab.example:443", token: "t" });
+  const after = loadConfig(true);
+  assert.deepEqual(after.fortigateDefault, ["edge"]);
+  assert.deepEqual(JSON.parse(readFileSync(join(root, "fortigate.json"), "utf-8")).fortigateDefault, ["edge"]);
+});
+
 useConfigDir(null);
 rmSync(root, { recursive: true, force: true });
 
