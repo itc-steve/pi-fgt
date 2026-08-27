@@ -289,6 +289,16 @@
         "byValue": []
       }
     },
+    "get_route_lookup": {
+      "keep": [
+        "gateway"
+      ]
+    },
+    "get_route_lookup_policy": {
+      "keep": [
+        "gateway"
+      ]
+    },
     "get_firewall_policies": {
       "dropValues": {
         "disableDefaults": true
@@ -306,6 +316,9 @@
         "schedule",
         "nat",
         "poolname",
+        "traffic-shaper",
+        "traffic-shaper-reverse",
+        "per-ip-shaper",
         "logtraffic",
         "utm-status",
         "inspection-mode",
@@ -336,6 +349,9 @@
         "schedule",
         "nat",
         "poolname",
+        "traffic-shaper",
+        "traffic-shaper-reverse",
+        "per-ip-shaper",
         "logtraffic",
         "utm-status",
         "inspection-mode",
@@ -367,7 +383,9 @@
         "description",
         "interface",
         "vlanid",
-        "member"
+        "member",
+        "vrf",
+        "mtu"
       ]
     },
     "get_firewall_sessions": {
@@ -382,10 +400,16 @@
         "srcintf",
         "dstintf",
         "policyid",
+        "policytype",
         "user",
+        "expiry",
         "duration",
         "sentbyte",
         "rcvdbyte",
+        "tx_packets",
+        "rx_packets",
+        "tx_shaper_drops",
+        "rx_shaper_drops",
         "apps",
         "country",
         "srcmac",
@@ -408,8 +432,7 @@
     },
     "get_routing_table": {
       "dropKeys": [
-        "ip_version",
-        "vrf"
+        "ip_version"
       ],
       "allowlist": [
         "ip_mask",
@@ -419,7 +442,8 @@
         "origin",
         "distance",
         "metric",
-        "priority"
+        "priority",
+        "vrf"
       ]
     },
     "get_static_routes": {
@@ -431,6 +455,8 @@
         "distance",
         "priority",
         "status",
+        "vrf",
+        "blackhole",
         "comment"
       ]
     },
@@ -505,9 +531,11 @@
     "get_ipsec_phase1": {
       "allowlist": [
         "name",
+        "status",
         "interface",
         "ike-version",
         "remote-gw",
+        "local-gw",
         "proposal",
         "dhgrp",
         "authmethod",
@@ -552,6 +580,7 @@
         "rcvdbyte",
         "tx_bandwidth",
         "rx_bandwidth",
+        "user",
         "apps"
       ]
     },
@@ -564,6 +593,7 @@
         "clients",
         "local_ipv4_addr",
         "local_addr",
+        "wtp_id",
         "connecting_interface",
         "board_mac",
         "join_time",
@@ -595,14 +625,21 @@
         "channel",
         "vlan_id",
         "radio_type",
+        "wtp_radio",
         "mimo",
         "bandwidth_tx",
         "bandwidth_rx",
         "security_str",
         "authentication",
-        "channel",
         "idle_time",
+        "association_time",
+        "sta_rxrate",
+        "sta_txrate",
         "data_rate_bps",
+        "data_rxrate_bps",
+        "data_txrate_bps",
+        "tx_discard_percentage",
+        "tx_retry_percentage",
         "health",
         "noise"
       ]
@@ -660,11 +697,19 @@
         "subtype",
         "source",
         "log_type",
+        "device",
+        "policyname",
         "returned",
         "fetched",
         "ready",
+        "completed",
+        "percent_logs_processed",
         "total_lines",
-        "polls"
+        "polls",
+        "session_id",
+        "path",
+        "category",
+        "subcategory"
       ]
     },
     "get_interfaces_status": {

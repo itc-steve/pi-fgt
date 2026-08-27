@@ -49,6 +49,10 @@ const POLICY = {
 	natip: "0.0.0.0 0.0.0.0",
 	nat: "enable",
 	logtraffic: "disable",
+	ippool: "enable",
+	fixedport: "enable",
+	"traffic-shaper": "wan-limit",
+	"session-ttl": "300",
 	comments: "",
 };
 
@@ -65,7 +69,13 @@ const SESSION = {
 	policyid: 2,
 	vf: "root",
 	app_list_id: 0,
+	policytype: "policy",
+	expiry: "120",
 	sentbyte: 139892,
+	tx_packets: 100,
+	rx_packets: 90,
+	tx_shaper_drops: 2,
+	rx_shaper_drops: 1,
 };
 
 const AP_CLIENT = {
@@ -77,6 +87,14 @@ const AP_CLIENT = {
 	noise: -95,
 	sta_rxrate_mcs: 6,
 	sta_rxrate_score: 67,
+	sta_rxrate: 130000,
+	sta_txrate: 65000,
+	data_rxrate_bps: 130000000,
+	data_txrate_bps: 65000000,
+	tx_retry_percentage: 12,
+	tx_discard_percentage: 3,
+	association_time: 1787539052,
+	wtp_radio: 1,
 	"11k_capable": false,
 	security: 10,
 	security_str: "wpa2_only_personal",
@@ -91,6 +109,12 @@ const AGGREGATE_INTERFACE = {
 	type: "aggregate",
 	speed: "auto",
 	member: [{ "interface-name": "a" }, { "interface-name": "b" }],
+	vrf: 2,
+	mtu: 1400,
+	"mtu-override": "enable",
+	"src-check": "disable",
+	"dhcp-relay-service": "enable",
+	"dhcp-relay-ip": "192.0.2.53",
 	"lacp-mode": "active",
 	"lacp-speed": "slow",
 	"min-links": 1,
@@ -145,6 +169,9 @@ const AGGREGATE_INTERFACE = {
 	assert.equal(out.vf, undefined, "internal id dropped");
 	assert.equal(out.app_list_id, undefined, "internal id dropped");
 	assert.equal(out.saddr, "192.168.5.3");
+	assert.equal(out.policytype, "policy", "policy kind must survive");
+	assert.equal(out.tx_packets, 100, "packet counters must survive");
+	assert.equal(out.tx_shaper_drops, 2, "shaper drops must survive");
 }
 
 // --- 5. wifi: dup identity + micro-telemetry out, RF floor stays ------------
@@ -157,6 +184,9 @@ const AGGREGATE_INTERFACE = {
 	assert.equal(out.security, undefined, "int dup of security_str dropped");
 	assert.equal(out.security_str, "wpa2_only_personal", "readable form survives");
 	assert.equal(out.noise, -95, "RF floor kept (exclude:false)");
+	assert.equal(out.sta_txrate, 65000, "negotiated client rate must survive");
+	assert.equal(out.tx_retry_percentage, 12, "retry percentage must survive");
+	assert.equal(out.association_time, 1787539052, "association time must survive");
 }
 
 // --- 5b. useful interface config survives; repeated LACP defaults do not ----
@@ -164,6 +194,10 @@ const AGGREGATE_INTERFACE = {
 	const { out } = run(AGGREGATE_INTERFACE, "get_interfaces_config");
 	assert.equal(out.speed, "auto", "configured speed/duplex must survive");
 	assert.deepEqual(out.member, AGGREGATE_INTERFACE.member, "aggregate members must survive");
+	assert.equal(out.vrf, 2, "interface VRF must survive");
+	assert.equal(out.mtu, 1400, "interface MTU must survive");
+	assert.equal(out["dhcp-relay-ip"], undefined, "relay detail needs verbose mode");
+	assert.equal(out["mtu-override"], undefined, "default-heavy flags stay filtered");
 	assert.equal(out["lacp-mode"], undefined, "repeated LACP defaults stay filtered");
 	assert.equal(out["lacp-speed"], undefined, "repeated LACP defaults stay filtered");
 	assert.equal(out["min-links"], undefined, "repeated LACP defaults stay filtered");
@@ -309,8 +343,12 @@ const AGGREGATE_INTERFACE = {
 		{
 			date: "2026-08-26", time: "12:00:00", level: "critical", virus: "EICAR",
 			appcat: "Malware",
-			_meta: { subtype: "virus", source: "fortianalyzer", returned: 1, fetched: 50,
-				ready: true, total_lines: 50, polls: 2, junk: "drop" },
+			_meta: {
+				subtype: "virus", source: "fortianalyzer", returned: 1, fetched: 50,
+				ready: true, completed: false, percent_logs_processed: 80,
+				total_lines: 50, polls: 2, path: "log/fortianalyzer/virus/virus",
+				device: "edge-fgt", session_id: 42, junk: "drop",
+			},
 		},
 		"get_logs",
 	).out;
@@ -318,6 +356,9 @@ const AGGREGATE_INTERFACE = {
 	assert.equal(log.virus, "EICAR", "malware name must survive");
 	assert.equal(log.appcat, "Malware", "application category must survive");
 	assert.equal(log._meta.total_lines, 50, "log completeness metadata must survive");
+	assert.equal(log._meta.path, "log/fortianalyzer/virus/virus", "queried log path must survive");
+	assert.equal(log._meta.device, "edge-fgt", "FAZ device identity must survive");
+	assert.equal(log._meta.percent_logs_processed, 80, "search progress must survive");
 	assert.equal(log._meta.junk, undefined, "nested records remain projected");
 
 	const policy = run(
@@ -331,6 +372,10 @@ const AGGREGATE_INTERFACE = {
 	assert.deepEqual(policy.poolname, [{ name: "egress-pool" }]);
 	assert.equal(policy["ssl-ssh-profile"], "certificate-inspection");
 	assert.equal(policy["av-profile"], "default");
+	assert.equal(policy.ippool, undefined, "default-heavy SNAT flags need verbose mode");
+	assert.equal(policy.fixedport, undefined, "default-heavy source-port flags need verbose mode");
+	assert.equal(policy["session-ttl"], undefined, "default-heavy TTL fields need verbose mode");
+	assert.equal(policy["traffic-shaper"], "wan-limit", "configured shaper must survive");
 
 	const address = run(
 		{ name: "printer", type: "mac", macaddr: [{ macaddr: "00:11:22:33:44:55" }] },
@@ -364,7 +409,19 @@ const AGGREGATE_INTERFACE = {
 		"get_routing_table",
 	).out;
 	assert.equal(route.origin, "sd-wan", "route provenance must survive");
-	assert.equal(route.vrf, undefined, "single-VDOM routing noise stays filtered");
+	assert.equal(route.vrf, 0, "route VRF must survive");
+	const lookup = run(
+		{ gateway: "0.0.0.0", interface: "wan1", unused: "0.0.0.0" },
+		"get_route_lookup",
+	).out;
+	assert.equal(lookup.gateway, "0.0.0.0", "on-link route next hop must survive");
+	assert.equal(lookup.unused, undefined, "unrelated zero placeholders must still drop");
+	const staticRoute = run(
+		{ "seq-num": 1, dst: "203.0.113.0/24", vrf: "2", blackhole: "enable" },
+		"get_static_routes",
+	).out;
+	assert.equal(staticRoute.vrf, "2", "static route VRF must survive");
+	assert.equal(staticRoute.blackhole, "enable", "blackhole state must survive");
 
 	const admin = run(
 		{ name: "ops", status: "disable", accprofile: "super_admin", password: "not-returned" },
@@ -382,6 +439,17 @@ const AGGREGATE_INTERFACE = {
 	assert.equal(sw.connecting_from, "port1", "switch topology must survive");
 	assert.equal(sw.port_count, 24, "derived switch port count must survive its allowlist");
 	assert.equal(sw.ports_up, 8, "derived switch up count must survive its allowlist");
+	const phase1 = run(
+		{ name: "branch", status: "up", interface: "wan1", "remote-gw": "198.51.100.1", "local-gw": "192.0.2.1" },
+		"get_ipsec_phase1",
+	).out;
+	assert.equal(phase1.status, "up", "phase1 status must survive");
+	assert.equal(phase1["local-gw"], "192.0.2.1", "phase1 local gateway must survive");
+	assert.equal(
+		run({ srcaddr: "192.0.2.10", user: "alice" }, "get_fortiview_statistics").out.user,
+		"alice",
+		"FortiView user must survive",
+	);
 	const port = run({ interface: "port1", switch_serial: "S1" }, "get_switch_port_status").out;
 	assert.equal(port.switch_serial, "S1", "switch port identity must survive");
 }

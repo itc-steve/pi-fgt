@@ -72,7 +72,9 @@ export interface FilterConfig {
 const POLICY_ALLOW = [
 	"policyid", "name", "srcintf", "dstintf", "srcaddr", "dstaddr",
 	"service", "action", "status", "schedule", "nat", "poolname",
-	"logtraffic", "utm-status", "inspection-mode", "profile-group",
+	"traffic-shaper", "traffic-shaper-reverse", "per-ip-shaper",
+	"logtraffic", "utm-status",
+	"inspection-mode", "profile-group",
 	"ssl-ssh-profile", "av-profile", "webfilter-profile",
 	"dnsfilter-profile", "ips-sensor", "application-list", "comments",
 ];
@@ -253,6 +255,9 @@ export const DEFAULT_FILTERS: FilterConfig = {
 		get_policy_routes_ipv6: { groups: { ipv6: false }, dropValues: { byValue: [] } },
 		get_sdwan_routes_ipv6: { groups: { ipv6: false }, dropValues: { byValue: [] } },
 		get_firewall_acl6_stats: { groups: { ipv6: false }, dropValues: { byValue: [] } },
+		// 0.0.0.0 is a valid on-link next hop in lookup results, not always noise.
+		get_route_lookup: { keep: ["gateway"] },
+		get_route_lookup_policy: { keep: ["gateway"] },
 		get_firewall_policies: {
 			dropValues: { disableDefaults: true },
 			allowlist: POLICY_ALLOW,
@@ -266,13 +271,15 @@ export const DEFAULT_FILTERS: FilterConfig = {
 			allowlist: [
 				"name", "ip", "type", "vdom", "mode", "role", "status", "speed",
 				"allowaccess", "alias", "description", "interface", "vlanid", "member",
+				"vrf", "mtu",
 			],
 		},
 		get_firewall_sessions: {
 			allowlist: [
 				"saddr", "sport", "daddr", "dport", "proto", "snaddr", "snport",
-				"srcintf", "dstintf", "policyid", "user",
-				"duration", "sentbyte", "rcvdbyte", "apps",
+				"srcintf", "dstintf", "policyid", "policytype", "user",
+				"expiry", "duration", "sentbyte", "rcvdbyte", "tx_packets", "rx_packets",
+				"tx_shaper_drops", "rx_shaper_drops", "apps",
 				"country", "srcmac", "dstmac",
 			],
 		},
@@ -283,16 +290,16 @@ export const DEFAULT_FILTERS: FilterConfig = {
 			],
 		},
 		get_routing_table: {
-			dropKeys: ["ip_version", "vrf"],
+			dropKeys: ["ip_version"],
 			allowlist: [
 				"ip_mask", "gateway", "interface", "type", "origin",
-				"distance", "metric", "priority",
+				"distance", "metric", "priority", "vrf",
 			],
 		},
 		get_static_routes: {
 			allowlist: [
 				"seq-num", "dst", "gateway", "device", "distance",
-				"priority", "status", "comment",
+				"priority", "status", "vrf", "blackhole", "comment",
 			],
 		},
 		get_address_objects: {
@@ -325,8 +332,8 @@ export const DEFAULT_FILTERS: FilterConfig = {
 		},
 		get_ipsec_phase1: {
 			allowlist: [
-				"name", "interface", "ike-version", "remote-gw", "proposal",
-				"dhgrp", "authmethod", "peertype", "net-device", "comments",
+				"name", "status", "interface", "ike-version", "remote-gw", "local-gw",
+				"proposal", "dhgrp", "authmethod", "peertype", "net-device", "comments",
 			],
 		},
 		get_ipsec_phase2: {
@@ -345,14 +352,14 @@ export const DEFAULT_FILTERS: FilterConfig = {
 			allowlist: [
 				"srcaddr", "dstaddr", "sessions", "srcmac", "srcintf", "dstintf",
 				"dst_port", "protocol", "sentbyte", "rcvdbyte",
-				"tx_bandwidth", "rx_bandwidth", "apps",
+				"tx_bandwidth", "rx_bandwidth", "user", "apps",
 			],
 		},
 		get_fortiaps: {
 			allowlist: [
 				"name", "serial", "status", "state", "clients",
 				// 7.6.7 renames local_ipv4_addr → local_addr; keep both for 7.4 boxes
-				"local_ipv4_addr", "local_addr", "connecting_interface", "board_mac",
+				"local_ipv4_addr", "local_addr", "wtp_id", "connecting_interface", "board_mac",
 				"join_time", "os_version", "ap_profile", "cpu_usage",
 				"mem_free", "mem_total", "health", "last_failure",
 				"last_reboot_time", "wan_status",
@@ -363,9 +370,10 @@ export const DEFAULT_FILTERS: FilterConfig = {
 				"mac", "ip", "ssid", "vap_name", "wtp_id", "wtp_ip",
 				// 7.6.7 renames hostname → host; keep both for 7.4 boxes
 				"hostname", "host", "manufacturer", "os", "signal", "snr", "channel",
-				"vlan_id", "radio_type", "mimo", "bandwidth_tx", "bandwidth_rx",
-				"security_str", "authentication", "channel", "idle_time",
-				"data_rate_bps", "health",
+				"vlan_id", "radio_type", "wtp_radio", "mimo", "bandwidth_tx", "bandwidth_rx",
+				"security_str", "authentication", "idle_time", "association_time",
+				"sta_rxrate", "sta_txrate", "data_rate_bps", "data_rxrate_bps", "data_txrate_bps",
+				"tx_discard_percentage", "tx_retry_percentage", "health",
 				// kept because wifi_rf_floor is ON by default
 				"noise",
 			],
@@ -387,8 +395,9 @@ export const DEFAULT_FILTERS: FilterConfig = {
 				"service", "proto", "app", "appcat", "duration",
 				"sentbyte", "rcvdbyte", "user", "msg", "logdesc", "reason",
 				"sessionid", "url", "hostname", "catdesc", "virus", "attack",
-				"severity", "type", "subtype", "source", "log_type",
-				"returned", "fetched", "ready", "total_lines", "polls",
+				"severity", "type", "subtype", "source", "log_type", "device", "policyname",
+				"returned", "fetched", "ready", "completed", "percent_logs_processed",
+				"total_lines", "polls", "session_id", "path", "category", "subcategory",
 			],
 		},
 		get_interfaces_status: {
