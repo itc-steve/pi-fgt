@@ -22,7 +22,8 @@ export function registerSdwanVpnTools(pi: ExtensionAPI): void {
     label: "FortiGate: SD-WAN Health Check",
     description:
       "SD-WAN SLA per-link stats (monitor/virtual-wan/health-check). " +
-      "Empty {} means no health-check probes configured — use get_sdwan_members for link/session/bandwidth. Read-only.",
+      "Deprecated in FortiOS 7.6.4+ (may return {} even when probes exist). " +
+      "Prefer get_sdwan_sla_log with latest=true. Read-only.",
     promptSnippet: "FortiGate sdwan health check",
     parameters: Type.Object({ ...deviceParam }),
     async execute(_id, params, signal) {
@@ -36,13 +37,19 @@ export function registerSdwanVpnTools(pi: ExtensionAPI): void {
           !Array.isArray(data) &&
           Object.keys(data).length === 0
         ) {
+          let sla_log: unknown;
+          try {
+            sla_log = fortiResults(
+              await fortiGet("monitor/virtual-wan/sla-log", dev, token, { latest: 1 }, signal),
+            );
+          } catch (e: any) {
+            if (e?.name === "AbortError") throw e;
+            sla_log = undefined;
+          }
           data = {
-            _empty: true,
+            sla_log,
             _hint:
-              "No SD-WAN health-check results — none configured or not running on this device. " +
-              "On FortiOS 7.6.4+ this endpoint is deprecated (returns {} even when present). " +
-              "Use get_sdwan_sla_log with latest=true (and sla=\"<name>\") for SLA metrics, " +
-              "or get_sdwan_members for per-link up/bandwidth/sessions. Read-only.",
+              "monitor/virtual-wan/health-check returned {}. On FortiOS 7.6.4+ this path is deprecated and may be empty even when probes exist. Use get_sdwan_sla_log with latest=true (optional sla=\"<name>\"), or get_sdwan_members for per-link stats.",
           };
         }
         data = bounded(data, "Narrow the query if truncated.", getMaxResponseBytes());

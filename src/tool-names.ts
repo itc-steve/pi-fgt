@@ -12,6 +12,7 @@ import { UTM_ENDPOINT_TOOL_NAMES } from "./tools/utm_endpoint.js";
 import { MISC_TOOL_NAMES } from "./tools/misc.js";
 
 const BASE_TOOL_NAMES = [
+	"set_fortigate_response_filtering",
 	// system (10)
 	"get_system_status",
 	"get_system_resource_usage",

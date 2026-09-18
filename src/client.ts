@@ -131,7 +131,8 @@ function sanitizeError(status: number, text: string, path?: string): string {
       `424 Failed Dependency: the request is missing a required parameter, or a ` +
       `prerequisite feature/setting is not enabled on the device. This is NOT a ` +
       `licensing error. Check that all required query params are supplied (e.g. ` +
-      `traffic-history/interface needs interface=), or that the related feature ` +
+      `traffic-history/interface needs interface=, firewall/sessions and ` +
+      `firewall/proxy/sessions need count=20..1000), or that the related feature ` +
       `(e.g. FortiView app bandwidth tracking) is enabled. Body: ${safe}`
     );
   }
@@ -143,6 +144,21 @@ export interface DeviceLike {
   url: string;
   vdom?: string;
   verifySsl?: boolean;
+}
+
+/** FortiOS 7.6+ sessions endpoints 424 without count=20..1000. */
+export function ensureSessionCount(
+  path: string,
+  params: Record<string, any> = {},
+): Record<string, any> {
+  const p = path.replace(/^\//, "");
+  if (
+    (p === "monitor/firewall/sessions" || p === "monitor/firewall/proxy/sessions") &&
+    params.count == null
+  ) {
+    return { ...params, count: 20 };
+  }
+  return params;
 }
 
 export async function fortiGet(
@@ -157,7 +173,7 @@ export async function fortiGet(
   const p = path.replace(/^\//, "");
 
   // Always pin device VDOM; never allow caller override via params.vdom.
-  const qs = buildQueryString(params, device.vdom || "root");
+  const qs = buildQueryString(ensureSessionCount(p, params), device.vdom || "root");
   const url = `${base}/api/v2/${p}?${qs}`;
 
   const verifySsl = device.verifySsl !== false;

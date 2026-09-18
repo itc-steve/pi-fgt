@@ -7,9 +7,16 @@
  */
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { Type } from "typebox";
 import { applyFortigateDefault, loadConfig, listDevices, resetSessionVisibility } from "./config.js";
 import { showDevicePicker } from "./device-picker.js";
-import { loadFilters, filtersPath, filtersLoadError } from "./filters/index.js";
+import {
+	loadFilters,
+	filtersPath,
+	filtersLoadError,
+	isSessionResponseFilteringEnabled,
+	setSessionResponseFiltering,
+} from "./filters/index.js";
 import { withFilterContext } from "./filters/wrap.js";
 import {
 	formatDeviceStatusLines,
@@ -113,7 +120,28 @@ export default function (pi: ExtensionAPI): void {
 	registerUtmEndpointTools(pi);
 	registerMiscTools(pi);
 
+	pi.registerTool({
+		name: "set_fortigate_response_filtering",
+		label: "FortiGate: Set Response Filtering",
+		description:
+			"Enable or disable response field filtering for this session. Secret fields and response size caps always remain enforced.",
+		promptSnippet: "Toggle session-scoped FortiGate response filtering",
+		parameters: Type.Object({
+			enabled: Type.Boolean({ description: "False for raw response shapes; true to restore configured filters" }),
+		}),
+		async execute(_id, params) {
+			setSessionResponseFiltering(params.enabled);
+			const result = {
+				enabled: params.enabled,
+				scope: "session",
+				responseSizeCapStillEnabled: true,
+			};
+			return { content: [{ type: "text", text: JSON.stringify(result) }], details: result };
+		},
+	});
+
 	pi.on("session_start", (_event, ctx) => {
+		setSessionResponseFiltering(true);
 		try {
 			resetSessionVisibility();
 			loadFilters(true);
@@ -225,7 +253,7 @@ export default function (pi: ExtensionAPI): void {
 			ctx.ui.notify(
 				[
 					err ? `⚠ ${err}` : `Config: ${filtersPath()}`,
-					`Filtering: ${fc.enabled ? "ON" : "OFF"}  |  verbose bypass: ${fc.audit?.verboseBypassesFilters ? "yes" : "no"}`,
+					`Session filtering: ${isSessionResponseFilteringEnabled() ? "ON" : "OFF"}  |  config filtering: ${fc.enabled ? "ON" : "OFF"}  |  verbose bypass: ${fc.audit?.verboseBypassesFilters ? "yes" : "no"}`,
 					`Excluded groups (${on.length}): ${on.join(", ") || "none"}`,
 					`Kept groups (${off.length}): ${off.join(", ") || "none"}`,
 					`Per-tool rules: ${tools.join(", ") || "none"}`,
@@ -238,6 +266,7 @@ export default function (pi: ExtensionAPI): void {
 
 		if (cmd === "off" || cmd === "disable" || cmd === "0") {
 			setFortiGateEnabled(pi, false);
+			setSessionResponseFiltering(true);
 			resetSessionVisibility();
 			updateStatus(ctx);
 			ctx.ui.notify("FortiGate tools OFF, temporary state cleared", "info");
@@ -247,6 +276,7 @@ export default function (pi: ExtensionAPI): void {
 		if (cmd === "toggle" || cmd === "t") {
 			if (currentlyOn) {
 				setFortiGateEnabled(pi, false);
+				setSessionResponseFiltering(true);
 				resetSessionVisibility();
 				updateStatus(ctx);
 				ctx.ui.notify("FortiGate tools OFF, temporary state cleared", "info");

@@ -22,6 +22,16 @@ const TTL_MS = 10_000;
 let cached: FilterConfig | null = null;
 let cacheTime = 0;
 let lastError: string | null = null;
+let sessionFilteringEnabled = true;
+
+const SECRET_KEYS = new Set([
+	"password",
+	"passwd",
+	"psksecret",
+	"passphrase",
+	"private-key",
+	"encpasswd",
+]);
 
 export function filtersPath(): string {
 	return FILTERS_PATH;
@@ -29,6 +39,14 @@ export function filtersPath(): string {
 
 export function filtersLoadError(): string | null {
 	return lastError;
+}
+
+export function setSessionResponseFiltering(enabled: boolean): void {
+	sessionFilteringEnabled = enabled;
+}
+
+export function isSessionResponseFilteringEnabled(): boolean {
+	return sessionFilteringEnabled;
 }
 
 function isObj(v: unknown): v is Record<string, any> {
@@ -97,14 +115,31 @@ export function currentTool(): ToolStore | undefined {
  * bounded() (sizing must see post-filter bytes) and again in textResult().
  * Idempotent: a second pass finds nothing left to drop.
  */
+function stripSecrets(value: unknown, stats: FilterStats): unknown {
+	if (Array.isArray(value)) return value.map((item) => stripSecrets(item, stats));
+	if (!value || typeof value !== "object") return value;
+
+	const out: Record<string, unknown> = {};
+	for (const [key, child] of Object.entries(value as Record<string, unknown>)) {
+		if (SECRET_KEYS.has(key.toLowerCase())) {
+			stats.keysDropped++;
+			stats.groups.add("secrets");
+			continue;
+		}
+		out[key] = stripSecrets(child, stats);
+	}
+	return out;
+}
+
 export function filterForCurrentTool(data: unknown): unknown {
 	const cfg = loadFilters();
-	if (!cfg.enabled) return data;
 	const ctx = currentTool();
-	if (ctx?.verbose && cfg.audit?.verboseBypassesFilters) return data;
-
 	const stats: FilterStats = ctx?.stats ?? { keysDropped: 0, groups: new Set<string>() };
-	return applyFilters(data, compile(cfg, ctx?.tool), stats, 0);
+	const safe = stripSecrets(data, stats);
+	if (!sessionFilteringEnabled || !cfg.enabled) return safe;
+	if (ctx?.verbose && cfg.audit?.verboseBypassesFilters) return safe;
+
+	return applyFilters(safe, compile(cfg, ctx?.tool), stats, 0);
 }
 
 /**
@@ -119,13 +154,13 @@ export interface FilterAudit {
 
 export function filterAudit(): FilterAudit | null {
 	const cfg = loadFilters();
-	if (!cfg.enabled || cfg.audit?.annotate === false) return null;
+	if (!sessionFilteringEnabled || !cfg.enabled || cfg.audit?.annotate === false) return null;
 	const ctx = currentTool();
 	if (!ctx || ctx.stats.keysDropped === 0) return null;
 	return {
 		keysDropped: ctx.stats.keysDropped,
 		groups: [...ctx.stats.groups].sort(),
-		hint: "Only listed rules removed fields; absent fields may not exist upstream. Adjust fortigate-filters.json to restore fields.",
+		hint: "Secret fields are always removed. Only listed rules remove other fields; absent fields may not exist upstream. Call set_fortigate_response_filtering with enabled=false, retry, then re-enable; edit fortigate-filters.json for persistent changes.",
 	};
 }
 
@@ -137,7 +172,7 @@ export function filterAudit(): FilterAudit | null {
  */
 export function groupEnabled(name: string): boolean {
 	const cfg = loadFilters();
-	if (!cfg.enabled) return false;
+	if (!sessionFilteringEnabled || !cfg.enabled) return false;
 	const ctx = currentTool();
 	if (ctx?.verbose && cfg.audit?.verboseBypassesFilters) return false;
 	const g = cfg.groups?.[name];

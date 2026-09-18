@@ -33,6 +33,14 @@ function alreadyBounded(data: unknown): boolean {
 	);
 }
 
+function stampFiltered(payload: unknown, audit: unknown): unknown {
+	if (!audit) return payload;
+	if (payload && typeof payload === "object" && !Array.isArray(payload)) {
+		return { ...(payload as object), _filtered: audit };
+	}
+	return { _filtered: audit, data: payload };
+}
+
 /** Compact JSON (no pretty-print). Never mid-slice JSON (invalid parse = P0 agent break). */
 export function textResult(data: unknown, details: Record<string, unknown> = {}) {
 	const max = filterMaxResponseBytes() ?? getMaxResponseBytes();
@@ -53,12 +61,7 @@ export function textResult(data: unknown, details: Record<string, unknown> = {})
 	// Stamp what the filters removed, so the model can offer it back.
 	// After bounding: the audit must survive truncation, not be truncated away.
 	const audit = filterAudit();
-	if (audit) {
-		payload =
-			payload && typeof payload === "object" && !Array.isArray(payload)
-				? { ...(payload as object), _filtered: audit }
-				: { _filtered: audit, data: payload };
-	}
+	payload = stampFiltered(payload, audit);
 
 	let text = JSON.stringify(payload);
 
@@ -75,7 +78,10 @@ export function textResult(data: unknown, details: Record<string, unknown> = {})
 			payload && typeof payload === "object" && !Array.isArray(payload)
 				? (payload as { _hint?: string })._hint
 				: undefined;
-		payload = bounded(inner, prevHint || defaultHint, Math.max(4000, Math.floor(max * 0.8)));
+		payload = stampFiltered(
+			bounded(inner, prevHint || defaultHint, Math.max(4000, Math.floor(max * 0.8))),
+			audit,
+		);
 		text = JSON.stringify(payload);
 	}
 	if (text.length > max) {
@@ -84,6 +90,7 @@ export function textResult(data: unknown, details: Record<string, unknown> = {})
 			_bytes_cap: max,
 			_hint: defaultHint,
 			preview: text.slice(0, Math.min(4000, max - 200)),
+			...(audit ? { _filtered: audit } : {}),
 		});
 	}
 

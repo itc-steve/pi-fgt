@@ -86,6 +86,7 @@ const AP_CLIENT = {
 	signal: -67,
 	noise: -95,
 	sta_rxrate_mcs: 6,
+	sta_txrate_mcs: 5,
 	sta_rxrate_score: 67,
 	sta_rxrate: 130000,
 	sta_txrate: 65000,
@@ -96,6 +97,11 @@ const AP_CLIENT = {
 	association_time: 1787539052,
 	wtp_radio: 1,
 	"11k_capable": false,
+	"11v_capable": true,
+	"11r_capable": true,
+	captive_portal_authenticated: true,
+	uses_captive_portal: true,
+	lan_authenticated: false,
 	security: 10,
 	security_str: "wpa2_only_personal",
 	health: {
@@ -133,6 +139,13 @@ const AGGREGATE_INTERFACE = {
 	assert.equal(out.action, "accept", "action must survive");
 	assert.deepEqual(out.srcintf, [{ name: "MGMT" }], "srcintf must survive");
 	assert.ok(stats.groups.has("uuid"), "uuid group must be reported");
+}
+
+// --- 1b. UUID catalog keeps correlation identity ---------------------------
+{
+	const uuid = "2d0f0986-cf9b-51ef-30c4-805df808e17b";
+	const { out } = run({ uuid, type: "firewall.address", vdom: "root" }, "get_firewall_uuid_list");
+	assert.equal(out.uuid, uuid, "UUID catalog must retain uuid");
 }
 
 // --- 2. allowlisted defaults survive value filtering -----------------------
@@ -174,13 +187,15 @@ const AGGREGATE_INTERFACE = {
 	assert.equal(out.tx_shaper_drops, 2, "shaper drops must survive");
 }
 
-// --- 5. wifi: dup identity + micro-telemetry out, RF floor stays ------------
+// --- 5. wifi: diagnostic evidence stays; duplicate identity/security go ----
 {
 	const { out } = run(AP_CLIENT, "get_wifi_clients");
 	assert.equal(out.wtp_name, undefined, "wtp_name duplicates wtp_id");
 	assert.equal(out.wtp_id, "FP421ETF20019562", "wtp_id survives");
-	assert.equal(out.sta_rxrate_mcs, undefined, "micro-telemetry dropped");
-	assert.equal(out["11k_capable"], undefined);
+	for (const key of [
+		"sta_rxrate_mcs", "sta_txrate_mcs", "11k_capable", "11v_capable", "11r_capable",
+		"captive_portal_authenticated", "uses_captive_portal", "lan_authenticated",
+	]) assert.equal(out[key], (AP_CLIENT as any)[key], `${key} must survive`);
 	assert.equal(out.security, undefined, "int dup of security_str dropped");
 	assert.equal(out.security_str, "wpa2_only_personal", "readable form survives");
 	assert.equal(out.noise, -95, "RF floor kept (exclude:false)");
@@ -372,9 +387,9 @@ const AGGREGATE_INTERFACE = {
 	assert.deepEqual(policy.poolname, [{ name: "egress-pool" }]);
 	assert.equal(policy["ssl-ssh-profile"], "certificate-inspection");
 	assert.equal(policy["av-profile"], "default");
-	assert.equal(policy.ippool, undefined, "default-heavy SNAT flags need verbose mode");
-	assert.equal(policy.fixedport, undefined, "default-heavy source-port flags need verbose mode");
-	assert.equal(policy["session-ttl"], undefined, "default-heavy TTL fields need verbose mode");
+	assert.equal(policy.ippool, "enable", "SNAT pool state must survive");
+	assert.equal(policy.fixedport, "enable", "source-port behavior must survive");
+	assert.equal(policy["session-ttl"], "300", "configured session TTL must survive");
 	assert.equal(policy["traffic-shaper"], "wan-limit", "configured shaper must survive");
 
 	const address = run(
@@ -439,12 +454,33 @@ const AGGREGATE_INTERFACE = {
 	assert.equal(sw.connecting_from, "port1", "switch topology must survive");
 	assert.equal(sw.port_count, 24, "derived switch port count must survive its allowlist");
 	assert.equal(sw.ports_up, 8, "derived switch up count must survive its allowlist");
+	const phase1Fields = [
+		"type", "mode-cfg", "keylife", "dpd", "dpd-retryinterval", "nattraversal",
+		"transport", "client-auto-negotiate", "client-keep-alive", "ipv4-start-ip",
+		"ipv4-end-ip", "ipv4-split-include", "dns-mode", "ipv4-dns-server1",
+		"ipv4-dns-server2", "eap", "eap-identity", "reauth", "certificate", "peergrp",
+		"xauthtype",
+	];
 	const phase1 = run(
-		{ name: "branch", status: "up", interface: "wan1", "remote-gw": "198.51.100.1", "local-gw": "192.0.2.1" },
+		{
+			name: "branch", status: "up", interface: "wan1", "remote-gw": "198.51.100.1",
+			"local-gw": "192.0.2.1", ...Object.fromEntries(phase1Fields.map((key) => [key, "configured"])),
+			psksecret: "must-not-survive",
+		},
 		"get_ipsec_phase1",
 	).out;
 	assert.equal(phase1.status, "up", "phase1 status must survive");
 	assert.equal(phase1["local-gw"], "192.0.2.1", "phase1 local gateway must survive");
+	for (const key of phase1Fields) assert.equal(phase1[key], "configured", `${key} must survive`);
+	assert.equal(phase1.psksecret, undefined, "IPsec secret must stay filtered");
+	const phase2 = run(
+		{ name: "branch-p2", dhgrp: "14", pfs: "enable", keepalive: "enable", psksecret: "no" },
+		"get_ipsec_phase2",
+	).out;
+	assert.equal(phase2.dhgrp, "14");
+	assert.equal(phase2.pfs, "enable");
+	assert.equal(phase2.keepalive, "enable");
+	assert.equal(phase2.psksecret, undefined);
 	assert.equal(
 		run({ srcaddr: "192.0.2.10", user: "alice" }, "get_fortiview_statistics").out.user,
 		"alice",
@@ -452,6 +488,30 @@ const AGGREGATE_INTERFACE = {
 	);
 	const port = run({ interface: "port1", switch_serial: "S1" }, "get_switch_port_status").out;
 	assert.equal(port.switch_serial, "S1", "switch port identity must survive");
+}
+
+// --- 8e. raw structural groups retain full nested records -----------------
+{
+	const cfg: FilterConfig = {
+		...DEFAULT_FILTERS,
+		groups: {
+			...DEFAULT_FILTERS.groups,
+			switch_port_counts: { ...DEFAULT_FILTERS.groups.switch_port_counts, exclude: false },
+			ipsec_compact: { ...DEFAULT_FILTERS.groups.ipsec_compact, exclude: false },
+		},
+	};
+	const ports = [{ port_name: "port1", status: "up", custom_detail: "raw" }];
+	assert.deepEqual(
+		run({ "switch-id": "S1", ports }, "get_fortiswitches", cfg).out.ports,
+		ports,
+		"disabled switch compaction must retain raw ports",
+	);
+	const proxyid = [{ p2name: "p2", status: "up", proxy_src: [{ subnet: "10.0.0.0/24" }] }];
+	assert.deepEqual(
+		run({ name: "vpn", proxyid }, "get_ipsec_tunnels", cfg).out.proxyid,
+		proxyid,
+		"disabled IPsec compaction must retain raw proxy IDs",
+	);
 }
 
 // --- 9. enabled:false is a true bypass --------------------------------------
@@ -469,6 +529,15 @@ const AGGREGATE_INTERFACE = {
 	assert.equal(out.length, 2, "arrays preserved");
 	assert.equal(out[0].uuid, undefined);
 	assert.equal(out[1].policyid, 1);
+}
+
+// --- 10b. records emptied inside arrays are removed ------------------------
+{
+	const { out } = run(
+		{ name: "group", member: [{ uuid: "hidden" }, { name: "visible", uuid: "hidden" }] },
+		"get_address_groups",
+	);
+	assert.deepEqual(out.member, [{ name: "visible" }]);
 }
 
 // --- 11. unknown tool = global rules only ----------------------------------

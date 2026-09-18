@@ -73,6 +73,11 @@ export function validatePath(
       `${label} contains invalid characters — provide a bare table path like 'firewall/policy' with no query string or scheme`,
     );
   }
+  if (/\/download$/i.test(p) || /^system\/config\/backup$/i.test(p)) {
+    throw new Error(
+      `${label} '${p}' is blocked (download/backup dumps are not allowed)`,
+    );
+  }
   return p;
 }
 

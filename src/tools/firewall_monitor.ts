@@ -8,6 +8,7 @@ import { resolveDevice, getToken, getMaxResponseBytes } from "../config.js";
 import { fortiGet, fortiResults } from "../client.js";
 import { bounded } from "../bounds.js";
 import { filterMaxExpandRequests } from "../filters/index.js";
+import { clampPerPage } from "../validate.js";
 
 export const FIREWALL_MONITOR_TOOL_NAMES = [
   "get_firewall_acl_stats",
@@ -31,6 +32,11 @@ export const FIREWALL_MONITOR_TOOL_NAMES = [
   "get_vip_overlap",
   "get_firewall_uuid_list",
 ] as const;
+
+/** FortiOS 7.6+ proxy/sessions count range [20, 1000]. */
+export function proxySessionCount(n: unknown): number {
+  return Math.min(1000, Math.max(20, clampPerPage(n ?? 20, 1000)));
+}
 
 export function buildLocalInPayload(
   configured: unknown,
@@ -328,14 +334,18 @@ export function registerFirewallMonitorTools(pi: ExtensionAPI): void {
   pi.registerTool({
     name: "get_proxy_sessions",
     label: "FortiGate: Proxy Sessions",
-    description: "Proxy sessions (monitor/firewall/proxy/sessions). Can be large. Read-only.",
+    description:
+      "Proxy sessions (monitor/firewall/proxy/sessions). FortiOS 7.6+ requires count=20..1000. Can be large. Read-only.",
     promptSnippet: "FortiGate proxy sessions",
-    parameters: Type.Object({ ...deviceParam }),
+    parameters: Type.Object({
+      ...deviceParam,
+      count: Type.Optional(Type.Number({ description: "Session fetch window (20..1000, default 20)" })),
+    }),
     async execute(_id, params, signal) {
       try {
         const { name, device: dev } = resolveDevice(params.device);
         const token = getToken(dev);
-        let data = fortiResults(await fortiGet("monitor/firewall/proxy/sessions", dev, token, {}, signal));
+        let data = fortiResults(await fortiGet("monitor/firewall/proxy/sessions", dev, token, { count: proxySessionCount(params.count) }, signal));
         data = bounded(data, "Narrow the query if truncated.", getMaxResponseBytes());
         return textResult(data, { device: name, path: "monitor/firewall/proxy/sessions" });
       } catch (e: any) {

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { buildLocalInPayload } from "./firewall_monitor.js";
+import { buildLocalInPayload, proxySessionCount } from "./firewall_monitor.js";
 
 const configured = [
   {
@@ -29,5 +29,11 @@ const fallback = buildLocalInPayload(undefined, monitor, true) as any;
 assert.deepEqual(fallback.custom, monitor.custom, "monitor custom must survive when CMDB is unavailable");
 assert.equal(fallback.compiled_custom, undefined);
 assert.match(fallback._hint, /CMDB local-in config was unavailable/);
+
+assert.equal(proxySessionCount(undefined), 20);
+assert.equal(proxySessionCount(5), 20);
+assert.equal(proxySessionCount(20), 20);
+assert.equal(proxySessionCount(250), 250);
+assert.equal(proxySessionCount(5000), 1000);
 
 console.log("local-in payload ok");

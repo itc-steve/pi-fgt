@@ -136,21 +136,13 @@
     },
     "wifi_micro_telemetry": {
       "exclude": true,
-      "why": "Per-client MCS index, rate scores, 802.11k/v/r flags. Only useful in deep RF debug.",
+      "why": "Per-client rate scores and duplicate numeric security fields.",
       "keys": [
-        "sta_rxrate_mcs",
-        "sta_txrate_mcs",
         "sta_rxrate_score",
         "sta_txrate_score",
         "sta_maxrate",
-        "11k_capable",
-        "11v_capable",
-        "11r_capable",
         "encrypt",
-        "security",
-        "captive_portal_authenticated",
-        "uses_captive_portal",
-        "lan_authenticated"
+        "security"
       ]
     },
     "wifi_rf_floor": {
@@ -289,6 +281,11 @@
         "byValue": []
       }
     },
+    "get_firewall_uuid_list": {
+      "groups": {
+        "uuid": false
+      }
+    },
     "get_route_lookup": {
       "keep": [
         "gateway"
@@ -315,7 +312,10 @@
         "status",
         "schedule",
         "nat",
+        "ippool",
+        "fixedport",
         "poolname",
+        "session-ttl",
         "traffic-shaper",
         "traffic-shaper-reverse",
         "per-ip-shaper",
@@ -348,7 +348,10 @@
         "status",
         "schedule",
         "nat",
+        "ippool",
+        "fixedport",
         "poolname",
+        "session-ttl",
         "traffic-shaper",
         "traffic-shaper-reverse",
         "per-ip-shaper",
@@ -541,7 +544,28 @@
         "authmethod",
         "peertype",
         "net-device",
-        "comments"
+        "comments",
+        "type",
+        "mode-cfg",
+        "keylife",
+        "dpd",
+        "dpd-retryinterval",
+        "nattraversal",
+        "transport",
+        "client-auto-negotiate",
+        "client-keep-alive",
+        "ipv4-start-ip",
+        "ipv4-end-ip",
+        "ipv4-split-include",
+        "dns-mode",
+        "ipv4-dns-server1",
+        "ipv4-dns-server2",
+        "eap",
+        "eap-identity",
+        "reauth",
+        "certificate",
+        "peergrp",
+        "xauthtype"
       ]
     },
     "get_ipsec_phase2": {
@@ -552,6 +576,9 @@
         "src-subnet",
         "dst-subnet",
         "auto-negotiate",
+        "dhgrp",
+        "pfs",
+        "keepalive",
         "comments"
       ]
     },
@@ -635,16 +662,27 @@
         "association_time",
         "sta_rxrate",
         "sta_txrate",
+        "sta_rxrate_mcs",
+        "sta_txrate_mcs",
         "data_rate_bps",
         "data_rxrate_bps",
         "data_txrate_bps",
         "tx_discard_percentage",
         "tx_retry_percentage",
+        "11k_capable",
+        "11v_capable",
+        "11r_capable",
+        "captive_portal_authenticated",
+        "uses_captive_portal",
+        "lan_authenticated",
         "health",
         "noise"
       ]
     },
     "get_fortiswitches": {
+      "keep": [
+        "ports"
+      ],
       "allowlist": [
         "switch-id",
         "serial",
@@ -792,6 +830,9 @@
       ]
     },
     "get_ipsec_tunnels": {
+      "keep": [
+        "proxyid"
+      ],
       "allowlist": [
         "name",
         "rgwy",

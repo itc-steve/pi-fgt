@@ -71,8 +71,8 @@ export interface FilterConfig {
 
 const POLICY_ALLOW = [
 	"policyid", "name", "srcintf", "dstintf", "srcaddr", "dstaddr",
-	"service", "action", "status", "schedule", "nat", "poolname",
-	"traffic-shaper", "traffic-shaper-reverse", "per-ip-shaper",
+	"service", "action", "status", "schedule", "nat", "ippool", "fixedport", "poolname",
+	"session-ttl", "traffic-shaper", "traffic-shaper-reverse", "per-ip-shaper",
 	"logtraffic", "utm-status",
 	"inspection-mode", "profile-group",
 	"ssl-ssh-profile", "av-profile", "webfilter-profile",
@@ -150,21 +150,13 @@ export const DEFAULT_FILTERS: FilterConfig = {
 		},
 		wifi_micro_telemetry: {
 			exclude: true,
-			why: "Per-client MCS index, rate scores, 802.11k/v/r flags. Only useful in deep RF debug.",
+			why: "Per-client rate scores and duplicate numeric security fields.",
 			keys: [
-				"sta_rxrate_mcs",
-				"sta_txrate_mcs",
 				"sta_rxrate_score",
 				"sta_txrate_score",
 				"sta_maxrate",
-				"11k_capable",
-				"11v_capable",
-				"11r_capable",
 				"encrypt",
 				"security",
-				"captive_portal_authenticated",
-				"uses_captive_portal",
-				"lan_authenticated",
 			],
 		},
 		wifi_rf_floor: {
@@ -255,6 +247,7 @@ export const DEFAULT_FILTERS: FilterConfig = {
 		get_policy_routes_ipv6: { groups: { ipv6: false }, dropValues: { byValue: [] } },
 		get_sdwan_routes_ipv6: { groups: { ipv6: false }, dropValues: { byValue: [] } },
 		get_firewall_acl6_stats: { groups: { ipv6: false }, dropValues: { byValue: [] } },
+		get_firewall_uuid_list: { groups: { uuid: false } },
 		// 0.0.0.0 is a valid on-link next hop in lookup results, not always noise.
 		get_route_lookup: { keep: ["gateway"] },
 		get_route_lookup_policy: { keep: ["gateway"] },
@@ -334,12 +327,17 @@ export const DEFAULT_FILTERS: FilterConfig = {
 			allowlist: [
 				"name", "status", "interface", "ike-version", "remote-gw", "local-gw",
 				"proposal", "dhgrp", "authmethod", "peertype", "net-device", "comments",
+				"type", "mode-cfg", "keylife", "dpd", "dpd-retryinterval", "nattraversal",
+				"transport", "client-auto-negotiate", "client-keep-alive", "ipv4-start-ip",
+				"ipv4-end-ip", "ipv4-split-include", "dns-mode", "ipv4-dns-server1",
+				"ipv4-dns-server2", "eap", "eap-identity", "reauth", "certificate",
+				"peergrp", "xauthtype",
 			],
 		},
 		get_ipsec_phase2: {
 			allowlist: [
 				"name", "phase1name", "proposal", "src-subnet", "dst-subnet",
-				"auto-negotiate", "comments",
+				"auto-negotiate", "dhgrp", "pfs", "keepalive", "comments",
 			],
 		},
 		get_policy_hit_counts: {
@@ -372,13 +370,17 @@ export const DEFAULT_FILTERS: FilterConfig = {
 				"hostname", "host", "manufacturer", "os", "signal", "snr", "channel",
 				"vlan_id", "radio_type", "wtp_radio", "mimo", "bandwidth_tx", "bandwidth_rx",
 				"security_str", "authentication", "idle_time", "association_time",
-				"sta_rxrate", "sta_txrate", "data_rate_bps", "data_rxrate_bps", "data_txrate_bps",
-				"tx_discard_percentage", "tx_retry_percentage", "health",
+				"sta_rxrate", "sta_txrate", "sta_rxrate_mcs", "sta_txrate_mcs",
+				"data_rate_bps", "data_rxrate_bps", "data_txrate_bps",
+				"tx_discard_percentage", "tx_retry_percentage", "11k_capable", "11v_capable",
+				"11r_capable", "captive_portal_authenticated", "uses_captive_portal",
+				"lan_authenticated", "health",
 				// kept because wifi_rf_floor is ON by default
 				"noise",
 			],
 		},
 		get_fortiswitches: {
+			keep: ["ports"],
 			allowlist: [
 				"switch-id", "serial", "status", "state", "connecting_from",
 				"join_time", "os_version", "fgt_peer_intf_name",
@@ -440,6 +442,7 @@ export const DEFAULT_FILTERS: FilterConfig = {
 		},
 		get_ipsec_tunnels: {
 			// Applied to the compact view built when group ipsec_compact is on.
+			keep: ["proxyid"],
 			allowlist: [
 				"name", "rgwy", "type", "connection_count",
 				"incoming_bytes", "outgoing_bytes", "comments", "status",

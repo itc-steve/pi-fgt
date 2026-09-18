@@ -12,6 +12,7 @@ import { buildLogFilter } from "./tools/logs.js";
 import { joinPolicyNames, zeroOnlyHits } from "./tools/network.js";
 import { matchesLinkState } from "./tools/system.js";
 import { poorOnlyClients } from "./tools/wireless.js";
+import { ensureSessionCount } from "./client.js";
 import { validatePath } from "./validate.js";
 
 // namespace stripped when it matches the calling tool
@@ -51,6 +52,28 @@ assert.equal(validatePath("monitor/wifi/client"), "wifi/client");
 assert.throws(() => validatePath("", "path"), /required/);
 assert.throws(() => validatePath("firewall/../etc", "path"), /\.\./);
 assert.throws(() => validatePath("firewall/policy?x=1", "path"), /query string/);
+assert.throws(
+	() => validatePath("system/com-log/download", "path", "monitor"),
+	/download\/backup/,
+);
+assert.throws(
+	() => validatePath("monitor/log/av-archive/download", "path", "monitor"),
+	/download\/backup/,
+);
+assert.throws(
+	() => validatePath("system/config/backup", "path", "monitor"),
+	/download\/backup/,
+);
+assert.throws(
+	() => validatePath("monitor/system/config/backup", "path"),
+	/download\/backup/,
+);
+assert.equal(validatePath("system/config", "path", "monitor"), "system/config");
+
+assert.deepEqual(ensureSessionCount("monitor/firewall/sessions", {}), { count: 20 });
+assert.deepEqual(ensureSessionCount("monitor/firewall/proxy/sessions", {}), { count: 20 });
+assert.deepEqual(ensureSessionCount("monitor/firewall/sessions", { count: 50 }), { count: 50 });
+assert.deepEqual(ensureSessionCount("monitor/network/arp", {}), {});
 
 // Query arrays become repeated filter= keys; caller cannot override pinned VDOM.
 const query = new URLSearchParams(buildQueryString({

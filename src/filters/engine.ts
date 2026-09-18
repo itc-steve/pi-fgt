@@ -211,7 +211,14 @@ export function applyFilters(
 	if (depth > 12) return value;
 
 	if (Array.isArray(value)) {
-		return value.map((v) => applyFilters(v, c, stats, depth + 1));
+		return value
+			.map((v) => [v, applyFilters(v, c, stats, depth + 1)] as const)
+			.filter(([before, after]) => !(
+				c.dropEmptyObject && before && typeof before === "object" && !Array.isArray(before) &&
+				Object.keys(before).length > 0 && after && typeof after === "object" &&
+				!Array.isArray(after) && Object.keys(after).length === 0
+			))
+			.map(([, after]) => after);
 	}
 	if (!value || typeof value !== "object") return value;
 
@@ -244,6 +251,10 @@ export function applyFilters(
 
 	const out: Record<string, unknown> = {};
 	for (const [k, v] of entries) {
+		if (c.keep.has(k)) {
+			out[k] = v;
+			continue;
+		}
 		if (c.flattenKeys.has(k)) {
 			const flat = flattenHealth(v);
 			if (flat && Object.keys(flat as object).length) {
